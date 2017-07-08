@@ -40,11 +40,13 @@ while :; do
 		--infodir=?*) INFODIR=${1#*=} ;;
 		--mandir=?*) MANDIR=${1#*=} ;;
 		--docdir=?*) DOCDIR=${1#*=} ;;
+		--localstatedir=?*) LOCALSTATEDIR=${1#*=} ;;
+		--sharedstatedir=?*) SHAREDSTATEDIR=${1#*=} ;;
 		--target=?*) TARGET=${1#*=} ;;
 #		--=?*) =${1#*=} ;;
-		*) break;
+		*) [ -n "${1-}" ] && echo "Unknown argument ${1}" >&2 ;;
 	esac
-	shift
+	shift || break
 done
 
 OBJDIR=$(pwd)
@@ -65,6 +67,8 @@ DOCDIR=${DOCDIR:-\$(datarootdir)/doc}
 MANDIR=${MANDIR:-\$(datarootdir)/man}
 INFODIR=${INFODIR:-\$(datarootdir)/info}
 LIBEXECDIR=${LIBEXECDIR:-\$(exec_prefix)/libexec}
+LOCALSTATEDIR=${LOCALSTATEDIR:-\$(prefix)/var}
+SHAREDSTATEDIR=${SHAREDSTATEDIR:-\$(prefix)/var/lib}
 TARGET=${TARGET:-}
 
 if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
@@ -227,6 +231,9 @@ s#@@PREFIX@@#${PREFIX}#;
 	s#@@EXECPREFIX@@#${EXECPREFIX}#;
 	s#@@LIBEXECDIR@@#${LIBEXECDIR}#;
 	s#@@INFODIR@@#${INFODIR}#;
+	s#@@LIBDIR@@#${LIBDIR}#;
+	s#@@LOCALSTATEDIR@@#${LOCALSTATEDIR}#;
+	s#@@SHAREDSTATEDIR@@#${SHAREDSTATEDIR}#;
 	s#@@CFLAGS@@#${CFLAGS}#;
 	s#@@LDFLAGS@@#${LDFLAGS}#;
 	s#@@CC@@#${CC}#;

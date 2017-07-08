@@ -29,6 +29,7 @@ bindir := @@BINDIR@@
 sbindir := @@SBINDIR@@
 libexecdir := @@LIBEXECDIR@@
 infodir := @@INFODIR@@
+libdir := @@LIBDIR@@
 
 package_OBJS = main.o util.o
 
@@ -46,10 +47,11 @@ $(PACKAGE): $(package_OBJS)
 .PHONY: install uninstall
 
 install: $(PACKAGE)
-	$(INSTALL_PROGRAM) $(PACKAGE) $(DESTDIR)$(sbindir)
+	$(INSTALL_PROGRAM) $(PACKAGE) $(DESTDIR)$(bindir)
+	$(INSTALL_DATA) $(srcdir)/tmpfiles.d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
 
 uninstall:
-	rm -f $(DESTDIR)$(sbindir)/$(PACKAGE)
+	rm -f $(DESTDIR)$(bindir)/$(PACKAGE)
 
 .PHONY: mostlyclean clean distclean maintainer-clean
 
@@ -67,7 +69,10 @@ maintainer-clean: distclean
 .PHONY: dist
 
 dist:
-	$(TAR) -acf $(PACKAGE).tar.xz --transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," $(all_SRCS) $(all_HEADERS) Makefile.in configure
+	$(TAR) -acf "$(PACKAGE)-$(VERSION).tar.xz" \
+		--transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," \
+		$(all_SRCS) $(all_HEADERS) Makefile.in configure \
+		$(PACKAGE).spec VERSION PACKAGE tmpfiles.d
 
 %.o : $(srcdir)/%.c
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
