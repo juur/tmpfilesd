@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+show_help() {
+	cat <<EOF
+	Usage: configure [options]
+Configuration:
+  --help                    print this message
+Directory and file names:
+  --prefix=PREFIX           
+  --exec-prefix=EPREFIX     
+  --bindir=DIR              
+  --sbindir=DIR             
+  --libexecdir=DIR          
+  --sysconfdir=DIR         
+  --libdir=DIR              
+  --includedir=DIR          
+  --datarootdir=DATAROOTDIR 
+  --datadir=DIR             
+  --mandir=DIR              
+EOF
+}
+
+while :; do
+	case ${1:-} in
+		-h|--help) show_help; exit ;;
+		--prefix=?*) PREFIX=${1#*=} ;;
+		--exec-prefix=?*) EXECPREFIX=${1#*=} ;;
+		--bindir=?*) BINDIR=${1#*=} ;;
+		--sbindir=?*) SBINDIR=${1#*=} ;;
+		--libexecdir=?*) LIBEXECDIR=${1#*=} ;;
+		--sysconfdir=?*) SYSCONFDIR=${1#*=} ;;
+		--libdir=?*) LIBDIR=${1#*=} ;;
+		--includedir=?*) INCLUDEDIR=${1#*=} ;;
+		--datarootdir=?*) DATAROOTDIR=${1#*=} ;;
+		--datadir=?*) DATADIR=${1#*=} ;;
+		--infodir=?*) INFODIR=${1#*=} ;;
+		--mandir=?*) MANDIR=${1#*=} ;;
+		--docdir=?*) DOCDIR=${1#*=} ;;
+		--target=?*) TARGET=${1#*=} ;;
+#		--=?*) =${1#*=} ;;
+		*) break;
+	esac
+	shift
+done
+
+OBJDIR=$(pwd)
+SRCDIR=$(dirname ${0})
+
+# Default file locations, or use env provided ones
+
+PREFIX=${PREFIX:-/usr/local}
+EXECPREFIX=${EXECPREFIX:-\$(prefix)}
+SYSCONFDIR=${SYSCONFDIR:-\$(prefix)/etc}
+BINDIR=${BINDIR:-\$(exec_prefix)/bin}
+INCLUDEDIR=${INCLUDEDIR:-\$(prefix)/include}
+LIBDIR=${LIBDIR:-\$(prefix)/lib}
+SBINDIR=${SBINDIR:-\$(exec_prefix)/sbin}
+DATAROOTDIR=${DATAROOTDIR:-\$(prefix)/share}
+DATADIR=${DATADIR:-\$(datarootdir)}
+DOCDIR=${DOCDIR:-\$(datarootdir)/doc}
+MANDIR=${MANDIR:-\$(datarootdir)/man}
+INFODIR=${INFODIR:-\$(datarootdir)/info}
+LIBEXECDIR=${LIBEXECDIR:-\$(exec_prefix)/libexec}
+TARGET=${TARGET:-}
+
+if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
+
+[ -n "${TARGET}" ] && TOOL="${TARGET}-" || TOOL=""
+
+# Default compiler flags
+
+CFLAGS=${CFLAGS:--O2}
+LDFLAGS=${LDFLAGS:-}
+TARGET=${TARGET:-}
+
+# Location of default tools
+
+PKG_CONFIG=${PKG_CONFIG:-pkg-config}
+CC=${CC:-${TOOL}gcc}
+CXX=${CXX:-${TOOL}g++}
+
+# Predefined values, which should not be easily changed
+
+PACKAGE=$(cat PACKAGE)
+VERSION=$(cat VERSION)
+
+HOST_MACHINE=$(${CC} -dumpmachine)
+
+if [ -n "${TARGET}" ]; then
+	echo "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE} for target ${TARGET}"
+else
+	echo "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE}"
+fi
+
+
+echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
+
+# List of system headers we need to check for
+
+H_FILES=""
+
+# List of system functions to check for
+
+FUNC_CHECK=""
+
+# Application specific variables
+
+# Check for pkg-config (mandatory)
+
+echo -n "Checking for pkg-config ... "
+if [ ! -x "$(which ${PKG_CONFIG})" ]; then
+	fail "Error: PKG_CONFIG not valid"
+fi
+
+export PKG_CONFIG
+echo "$(which ${PKG_CONFIG})"
+
+# Check for a c compiler (mandatory)
+
+echo -n "Checking for a c compiler ... "
+if [ ! -x "$(which ${CC})" ]; then
+	fail "Error: CC not valid"
+else
+	export CC
+	echo "$(which ${CC})"
+fi
+
+# Check for a 
+
+# Support functions
+
+check_pkg() 
+{
+	echo -n "Checking for $1 ... "
+	$(${PKG_CONFIG} --exists "${1}")
+	local RT=$?
+	ok ${RT}
+	return ${RT}
+}
+
+fail()
+{
+	echo "${1}"
+	exit 1
+}
+
+check_header()
+{
+	echo -n "Checking for ${1} ... "
+	$(echo "#include <${1}>" | ${CC} ${CFLAGS} ${LDFLAGS} -E - -o /dev/null 2>/dev/null)
+	local RT=$?
+	ok $?
+	return ${RT}
+}
+
+check_lib()
+{
+	local F=/tmp/$$.c
+	echo 'main(){}' >${F}
+	echo -n "Checking for -l${1} ... "
+	$(${CC} -l${1} ${F} -o /dev/null 2>/dev/null)
+	local RT=$?
+	ok ${RT}
+	rm -f ${F}
+	return ${RT}
+}
+
+ok()
+{
+	if [ $1 -eq 0 ]; then echo "ok"; else echo "not found"; fi
+}
+
+check_func()
+{
+	local F=/tmp/$$.c
+	echo "void main() { ${1}(); }" >${F}
+	echo -n "Checking for ${1}() ... "
+	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} ${F} -o /dev/null 2>/dev/null)
+	local RT=$?
+	ok ${RT}
+	rm -f ${F}
+	return ${RT}
+}
+
+# start a new configuration file
+if [ -e config.h ]; then mv -f config.h config.h~; fi
+rm -f config.h
+
+# kludge any defines here
+
+# set-up defines
+echo "#define VERSION \"${VERSION}\"" >> config.h
+
+# package checks
+
+# library checks
+
+# Perform checks for system headers and functions
+# This is done here to ensure relevant libraries are linked etc.
+
+for f in ${H_FILES} ; do
+	def=$(echo ${f} | sed "s#/#_#;s#\.#_#" | tr "[a-z]" "[A-Z]")
+	if check_header "${f}"; then echo "#define HAVE_${def} 1" >> config.h; fi
+done
+
+for f in ${FUNC_CHECK}; do
+	def=$(echo ${f} | tr "[a-z]" "[A-Z]")
+	if check_func "${f}"; then echo "#define HAVE_${def} 1" >> config.h; fi
+done
+
+# Create Makefile from template
+
+echo "Writing Makefile"
+
+ARGS=$(cat <<- __END
+s#@@PREFIX@@#${PREFIX}#;
+	s#@@EXECPREFIX@@#${EXECPREFIX}#;
+	s#@@SYSCONFDIR@@#${SYSCONFDIR}#;
+	s#@@BINDIR@@#${BINDIR}#;
+	s#@@SBINDIR@@#${SBINDIR}#;
+	s#@@DATADIR@@#${DATADIR}#;
+	s#@@DATAROOTDIR@@#${DATAROOTDIR}#;
+	s#@@EXECPREFIX@@#${EXECPREFIX}#;
+	s#@@LIBEXECDIR@@#${LIBEXECDIR}#;
+	s#@@INFODIR@@#${INFODIR}#;
+	s#@@CFLAGS@@#${CFLAGS}#;
+	s#@@LDFLAGS@@#${LDFLAGS}#;
+	s#@@CC@@#${CC}#;
+	s#@@CXX@@#${CXX}#;
+	s#@@SRCDIR@@#${SRCDIR}#;
+__END
+)
+
+cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > Makefile
+
+echo "Please type make to continue"

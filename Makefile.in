@@ -1,0 +1,76 @@
+SHELL = /bin/sh
+
+srcdir := @@SRCDIR@@
+
+.SUFFIXES:
+.SUFFIXES: .c .o
+
+DESTDIR :=
+CC := @@CC@@
+CXX := @@CXX@@
+CFLAGS := @@CFLAGS@@ -std=gnu99
+CPPFLAGS :=
+LDFLAGS := -L$(srcdir) -L. @@LDFLAGS@@
+CAT := cat
+TAR := tar
+PKGCONFIG := pkg-config
+VERSION := $(shell $(CAT) "VERSION")
+PACKAGE := $(shell $(CAT) "PACKAGE")
+
+INSTALL = install -c
+INSTALL_PROGRAM = $(INSTALL)
+INSTALL_DATA = $(INSTALL) -m 644
+
+prefix := @@PREFIX@@
+datarootdir := @@DATAROOTDIR@@
+datadir := @@DATADIR@@
+exec_prefix := @@EXECPREFIX@@
+bindir := @@BINDIR@@
+sbindir := @@SBINDIR@@
+libexecdir := @@LIBEXECDIR@@
+infodir := @@INFODIR@@
+
+package_OBJS = main.o util.o
+
+all_SRCS := $(wildcard $(srcdir)/*.c)
+all_HEADERS := $(wildcard $(srcdir)/*.h)
+
+CPPFLAGS += -MMD -MP
+
+.PHONY: all
+all: $(PACKAGE)
+
+$(PACKAGE): $(package_OBJS)
+	$(CC) $(LDFLAGS) $(package_OBJS) -o $@
+
+.PHONY: install uninstall
+
+install: $(PACKAGE)
+	$(INSTALL_PROGRAM) $(PACKAGE) $(DESTDIR)$(sbindir)
+
+uninstall:
+	rm -f $(DESTDIR)$(sbindir)/$(PACKAGE)
+
+.PHONY: mostlyclean clean distclean maintainer-clean
+
+mostlyclean:
+	$(RM) *.o $(PACKAGE)
+
+clean: mostlyclean
+
+distclean: clean
+	$(RM) *.d config.h
+
+maintainer-clean: distclean
+	$(RM) Makefile
+
+.PHONY: dist
+
+dist:
+	$(TAR) -acf $(PACKAGE).tar.xz --transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," $(all_SRCS) $(all_HEADERS) Makefile.in configure
+
+%.o : $(srcdir)/%.c
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
+
+
+-include $(all_SRCS:$(srcdir)/%.c=%.d)
