@@ -48,7 +48,7 @@ $(PACKAGE): $(package_OBJS)
 
 install: $(PACKAGE)
 	$(INSTALL_PROGRAM) $(PACKAGE) $(DESTDIR)$(bindir)
-	$(INSTALL_DATA) $(srcdir)/tmpfiles.d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
+	$(INSTALL_DATA) $(srcdir)/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
 
 uninstall:
 	rm -f $(DESTDIR)$(bindir)/$(PACKAGE)
@@ -61,10 +61,10 @@ mostlyclean:
 clean: mostlyclean
 
 distclean: clean
-	$(RM) *.d config.h
+	$(RM) *.d config.h Makefile
 
 maintainer-clean: distclean
-	$(RM) Makefile
+	$(RM) $(PACKAGE)-$(VERSION).tar.xz config.h~
 
 .PHONY: dist
 
@@ -72,7 +72,7 @@ dist:
 	$(TAR) -acf "$(PACKAGE)-$(VERSION).tar.xz" \
 		--transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," \
 		$(all_SRCS) $(all_HEADERS) Makefile.in configure \
-		$(PACKAGE).spec VERSION PACKAGE tmpfiles.d
+		$(PACKAGE).spec VERSION PACKAGE tmpfiles-d
 
 %.o : $(srcdir)/%.c
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
