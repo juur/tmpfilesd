@@ -43,6 +43,7 @@ install -T -m 755 misc/%{name}.init %{buildroot}%{_initrddir}/%{name}
 %{_bindir}/*
 %dir %{_sysconfdir}/tmpfiles.d/
 %{_prefix}/lib/tmpfiles.d/*
+%doc COPYING
 
 %files sysvinit
 %defattr(-,root,root,-)
