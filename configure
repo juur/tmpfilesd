@@ -9,18 +9,22 @@ show_help() {
 	Usage: configure [options]
 Configuration:
   --help                    print this message
+  --target=TARGET           cross-compile target
 Directory and file names:
-  --prefix=PREFIX           
-  --exec-prefix=EPREFIX     
-  --bindir=DIR              
-  --sbindir=DIR             
-  --libexecdir=DIR          
-  --sysconfdir=DIR         
-  --libdir=DIR              
-  --includedir=DIR          
-  --datarootdir=DATAROOTDIR 
-  --datadir=DIR             
-  --mandir=DIR              
+  --prefix=DIR
+  --exec-prefix=DIR
+  --bindir=DIR
+  --sbindir=DIR
+  --libexecdir=DIR
+  --sysconfdir=DIR
+  --libdir=DIR
+  --includedir=DIR
+  --datarootdir=DIR
+  --datadir=DIR
+  --mandir=DIR
+  --localstatedir=DIR
+  --sharedstatedir=DIR
+
 EOF
 }
 
@@ -89,8 +93,18 @@ CXX=${CXX:-${TOOL}g++}
 
 # Predefined values, which should not be easily changed
 
-PACKAGE=$(cat PACKAGE)
-VERSION=$(cat VERSION)
+PACKAGE=$(cat ${SRCDIR}/misc/PACKAGE)
+VERSION=$(cat ${SRCDIR}/misc/VERSION)
+
+# Check for a c compiler (mandatory)
+
+echo -n "Checking for a c compiler ... "
+if [ ! -x "$(which ${CC})" ]; then
+	fail "Error: CC not valid"
+else
+	export CC
+	echo "$(which ${CC})"
+fi
 
 HOST_MACHINE=$(${CC} -dumpmachine)
 
@@ -99,7 +113,6 @@ if [ -n "${TARGET}" ]; then
 else
 	echo "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE}"
 fi
-
 
 echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
@@ -122,18 +135,6 @@ fi
 
 export PKG_CONFIG
 echo "$(which ${PKG_CONFIG})"
-
-# Check for a c compiler (mandatory)
-
-echo -n "Checking for a c compiler ... "
-if [ ! -x "$(which ${CC})" ]; then
-	fail "Error: CC not valid"
-else
-	export CC
-	echo "$(which ${CC})"
-fi
-
-# Check for a 
 
 # Support functions
 
@@ -191,13 +192,13 @@ check_func()
 }
 
 # start a new configuration file
-if [ -e config.h ]; then mv -f config.h config.h~; fi
-rm -f config.h
+if [ -e ${OBJDIR}/config.h ]; then mv -f ${OBJDIR}/config.h ${OBJDIR}/config.h~; fi
+rm -f ${OBJDIR}/config.h
 
 # kludge any defines here
 
 # set-up defines
-echo "#define VERSION \"${VERSION}\"" >> config.h
+echo "#define VERSION \"${VERSION}\"" >> ${OBJDIR}/config.h
 
 # package checks
 
@@ -208,12 +209,12 @@ echo "#define VERSION \"${VERSION}\"" >> config.h
 
 for f in ${H_FILES} ; do
 	def=$(echo ${f} | sed "s#/#_#;s#\.#_#" | tr "[a-z]" "[A-Z]")
-	if check_header "${f}"; then echo "#define HAVE_${def} 1" >> config.h; fi
+    if check_header "${f}"; then echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h; fi
 done
 
 for f in ${FUNC_CHECK}; do
 	def=$(echo ${f} | tr "[a-z]" "[A-Z]")
-	if check_func "${f}"; then echo "#define HAVE_${def} 1" >> config.h; fi
+	if check_func "${f}"; then echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h; fi
 done
 
 # Create Makefile from template
@@ -221,7 +222,7 @@ done
 echo "Writing Makefile"
 
 ARGS=$(cat <<- __END
-s#@@PREFIX@@#${PREFIX}#;
+    s#@@PREFIX@@#${PREFIX}#;
 	s#@@EXECPREFIX@@#${EXECPREFIX}#;
 	s#@@SYSCONFDIR@@#${SYSCONFDIR}#;
 	s#@@BINDIR@@#${BINDIR}#;
@@ -239,9 +240,10 @@ s#@@PREFIX@@#${PREFIX}#;
 	s#@@CC@@#${CC}#;
 	s#@@CXX@@#${CXX}#;
 	s#@@SRCDIR@@#${SRCDIR}#;
+	s#@@OBJDIR@@#${OBJDIR}#;
 __END
 )
 
-cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > Makefile
+cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > ${OBJDIR}/Makefile
 
 echo "Please type make to continue"

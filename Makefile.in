@@ -1,81 +1,89 @@
 SHELL = /bin/sh
 
 srcdir := @@SRCDIR@@
+objdir := @@OBJDIR@@
 
 .SUFFIXES:
 .SUFFIXES: .c .o
 
-DESTDIR :=
-CC := @@CC@@
-CXX := @@CXX@@
-CFLAGS := @@CFLAGS@@ -std=gnu99
-CPPFLAGS :=
-LDFLAGS := -L$(srcdir) -L. @@LDFLAGS@@
-CAT := cat
-TAR := tar
-PKGCONFIG := pkg-config
-VERSION := $(shell $(CAT) "VERSION")
-PACKAGE := $(shell $(CAT) "PACKAGE")
+DESTDIR         := 
+CC              := @@CC@@
+CXX             := @@CXX@@
+CFLAGS          := @@CFLAGS@@ -std=gnu99
+CPPFLAGS        := 
+LDFLAGS         := -L$(srcdir)/src -L$(objdir) -L. @@LDFLAGS@@
+CAT             := cat
+TAR             := tar
+PKGCONFIG       := pkg-config
+VERSION         := $(shell $(CAT) "$(srcdir)/misc/VERSION")
+PACKAGE         := $(shell $(CAT) "$(srcdir)/misc/PACKAGE")
+INSTALL         := install -c
+INSTALL_PROGRAM := $(INSTALL)
+INSTALL_DATA    := $(INSTALL) -m 644
 
-INSTALL = install -c
-INSTALL_PROGRAM = $(INSTALL)
-INSTALL_DATA = $(INSTALL) -m 644
-
-prefix := @@PREFIX@@
+prefix      := @@PREFIX@@
 datarootdir := @@DATAROOTDIR@@
-datadir := @@DATADIR@@
+datadir     := @@DATADIR@@
 exec_prefix := @@EXECPREFIX@@
-bindir := @@BINDIR@@
-sbindir := @@SBINDIR@@
-libexecdir := @@LIBEXECDIR@@
-infodir := @@INFODIR@@
-libdir := @@LIBDIR@@
+bindir      := @@BINDIR@@
+sbindir     := @@SBINDIR@@
+libexecdir  := @@LIBEXECDIR@@
+infodir     := @@INFODIR@@
+libdir      := @@LIBDIR@@
 
-package_OBJS = main.o util.o
+all_SRCS     := $(wildcard $(srcdir)/src/*.c)
+all_HEADERS  := $(wildcard $(srcdir)/src/*.h)
+package_OBJS := $(addprefix $(objdir)/,$(notdir $(all_SRCS:.c=.o)))
 
-all_SRCS := $(wildcard $(srcdir)/*.c)
-all_HEADERS := $(wildcard $(srcdir)/*.h)
+CPPFLAGS += -MMD -MP -I$(objdir) -I$(srcdir)/src
 
-CPPFLAGS += -MMD -MP
 
 .PHONY: all
-all: $(PACKAGE)
+all: $(objdir)/.d $(objdir)/$(PACKAGE)
 
-$(PACKAGE): $(package_OBJS)
+$(objdir)/.d:
+	@mkdir -p $(objdir)/.d 2>/dev/null
+
+$(objdir)/$(PACKAGE): $(package_OBJS)
 	$(CC) $(LDFLAGS) $(package_OBJS) -o $@
+
 
 .PHONY: install uninstall
 
 install: $(PACKAGE)
-	$(INSTALL_PROGRAM) $(PACKAGE) $(DESTDIR)$(bindir)
-	$(INSTALL_DATA) $(srcdir)/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
+	$(INSTALL_PROGRAM) $(objdir)/$(PACKAGE) $(DESTDIR)$(bindir)
+	$(INSTALL_DATA) $(srcdir)/misc/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
 
 uninstall:
 	rm -f $(DESTDIR)$(bindir)/$(PACKAGE)
 
+
 .PHONY: mostlyclean clean distclean maintainer-clean
 
 mostlyclean:
-	$(RM) *.o $(PACKAGE)
+	$(RM) $(package_OBJS) $(objdir)/$(PACKAGE)
 
 clean: mostlyclean
 
 distclean: clean
-	$(RM) *.d config.h Makefile
+	$(RM) $(objdir)/config.h $(objdir)/Makefile
+	$(RM) -rf $(objdir)/.d
 
 maintainer-clean: distclean
-	$(RM) $(PACKAGE)-$(VERSION).tar.xz config.h~
+	$(RM) $(PACKAGE)-$(VERSION).tar.xz $(objdir)/config.h~
+
 
 .PHONY: dist
 
 dist:
-	$(TAR) -acf "$(PACKAGE)-$(VERSION).tar.xz" \
+	pushd $(srcdir) >/dev/null ; \
+	$(TAR) -acf $(objdir)/$(PACKAGE)-$(VERSION).tar.xz \
 		--transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," \
-		$(all_SRCS) $(all_HEADERS) Makefile.in configure \
-		$(PACKAGE).spec VERSION PACKAGE tmpfiles-d
+		COPYING src misc Makefile.in configure ; \
+	popd >/dev/null
 
-%.o : $(srcdir)/%.c
-	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
+$(objdir)/%.o: $(srcdir)/src/%.c
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) -MF $(objdir)/.d/$*.d $< -o $@
 
+-include $(all_SRCS:$(srcdir)/src/%.c=$(objdir)/.d/%.d)
 
--include $(all_SRCS:$(srcdir)/%.c=%.d)
