@@ -79,7 +79,7 @@ dist:
 	pushd $(srcdir) >/dev/null ; \
 	$(TAR) -acf $(objdir)/$(PACKAGE)-$(VERSION).tar.xz \
 		--transform="s,^./,,;s,^,$(PACKAGE)-$(VERSION)/," \
-		COPYING src misc Makefile.in configure ; \
+		README.md COPYING src misc Makefile.in configure ; \
 	popd >/dev/null
 
 $(objdir)/%.o: $(srcdir)/src/%.c
