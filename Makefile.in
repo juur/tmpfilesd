@@ -66,8 +66,9 @@ mostlyclean:
 clean: mostlyclean
 
 distclean: clean
+	$(RM) config.log
 	$(RM) $(objdir)/config.h $(objdir)/Makefile
-	$(RM) -rf $(objdir)/.d
+	$(RM) -r $(objdir)/.d
 
 maintainer-clean: distclean
 	$(RM) $(PACKAGE)-$(VERSION).tar.xz $(objdir)/config.h~

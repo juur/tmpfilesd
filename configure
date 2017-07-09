@@ -4,6 +4,9 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+# log all of the scripts output to config.log
+exec &> >(tee -a config.log)
+
 show_help() {
 	cat <<EOF
 	Usage: configure [options]
@@ -56,6 +59,10 @@ done
 OBJDIR=$(pwd)
 SRCDIR=$(dirname ${0})
 
+if [[ "$(realpath ${OBJDIR})" = "$(realpath ${SRCDIR})" ]]; then
+	echo "Building inside source directory."
+fi
+
 # Default file locations, or use env provided ones
 
 PREFIX=${PREFIX:-/usr/local}
@@ -82,6 +89,7 @@ if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
 # Default compiler flags
 
 CFLAGS=${CFLAGS:--O2}
+CPPFLAGS=${CPPFLAGS:-}
 LDFLAGS=${LDFLAGS:-}
 TARGET=${TARGET:-}
 
@@ -98,13 +106,17 @@ VERSION=$(cat ${SRCDIR}/misc/VERSION)
 
 # Check for a c compiler (mandatory)
 
-echo -n "Checking for a c compiler ... "
+echo -n "Checking for a C compiler ... "
 if [ ! -x "$(which ${CC})" ]; then
 	fail "Error: CC not valid"
 else
 	export CC
-	echo "$(which ${CC})"
+	echo "$(which ${CC})" | tee -a config.log
 fi
+
+echo -n "Checking $(basename ${CC}) can produce executables ... "
+echo -e '#include <stdlib.h>\nmain() {exit(0);}' | \
+	gcc -xc -o /dev/null - 2>&1 && echo "Ok" || { echo "Fail"; exit 1; }
 
 HOST_MACHINE=$(${CC} -dumpmachine)
 
@@ -118,11 +130,19 @@ echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
 # List of system headers we need to check for
 
-H_FILES=""
+H_FILES="stdlib.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h"
 
-# List of system functions to check for
+# List of system functions to check for function:arg0,arg1
 
 FUNC_CHECK=""
+
+# List of pkg-config things to check for
+
+PKG_CHECK=""
+
+# List of libraries to check for here
+
+LIB_CHECK=""
 
 # Application specific variables
 
@@ -156,7 +176,8 @@ fail()
 check_header()
 {
 	echo -n "Checking for ${1} ... "
-	$(echo "#include <${1}>" | ${CC} ${CFLAGS} ${LDFLAGS} -E - -o /dev/null 2>/dev/null)
+	$(echo "#include <${1}>" | \
+		${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} -E - -o /dev/null 2>>config.log)
 	local RT=$?
 	ok $?
 	return ${RT}
@@ -165,9 +186,12 @@ check_header()
 check_lib()
 {
 	local F=/tmp/$$.c
-	echo 'main(){}' >${F}
+
+	echo "#define _GNU_SOURCE" >${F}
+	echo 'main(){}' >>${F}
 	echo -n "Checking for -l${1} ... "
-	$(${CC} -l${1} ${F} -o /dev/null 2>/dev/null)
+	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} -l${1} ${F} \
+		-o /dev/null 2>>config.log)
 	local RT=$?
 	ok ${RT}
 	rm -f ${F}
@@ -182,17 +206,27 @@ ok()
 check_func()
 {
 	local F=/tmp/$$.c
-	echo "void main() { ${1}(); }" >${F}
-	echo -n "Checking for ${1}() ... "
-	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} ${F} -o /dev/null 2>/dev/null)
+	local FUNC="$(echo "${1}" | cut -d: -f1)"
+	local ARGS="$(echo "${1}" | cut -d: -f2-)"
+
+	echo "#define _GNU_SOURCE" >${F}
+	for i in ${H_FILES} ; do
+		echo "#include <${i}>" >>${F}
+	done
+	echo "void main() { ${FUNC}(${ARGS}); }" >>${F}
+	echo -n "Checking for ${FUNC}() ... "
+	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} ${F} -o /dev/null 2>>config.log)
 	local RT=$?
+
 	ok ${RT}
 	rm -f ${F}
 	return ${RT}
 }
 
 # start a new configuration file
-if [ -e ${OBJDIR}/config.h ]; then mv -f ${OBJDIR}/config.h ${OBJDIR}/config.h~; fi
+if [ -e ${OBJDIR}/config.h ]; then 
+	mv -f ${OBJDIR}/config.h ${OBJDIR}/config.h~; 
+fi
 rm -f ${OBJDIR}/config.h
 
 # kludge any defines here
@@ -202,19 +236,34 @@ echo "#define VERSION \"${VERSION}\"" >> ${OBJDIR}/config.h
 
 # package checks
 
+for f in ${PKG_CHECK} ; do
+	if check_pkg "${f}"; then
+		CFLAGS="${CFLAGS} $(${PKG_CONFIG} --cflags "${f}")"
+		LDFLAGS="${LDFLAGS} $(${PKG_CONFIG} --libs "${f}")"
+	fi
+done
+
 # library checks
+
+for f in ${LIB_CHECK} ; do
+	if check_lib "${f}"; then LDFLAGS="${LDFLAGS} -l${f}" ; fi
+done
 
 # Perform checks for system headers and functions
 # This is done here to ensure relevant libraries are linked etc.
 
 for f in ${H_FILES} ; do
-	def=$(echo ${f} | sed "s#/#_#;s#\.#_#" | tr "[a-z]" "[A-Z]")
-    if check_header "${f}"; then echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h; fi
+	def=$(echo ${f} | sed "s#/#_#;s#\.#_#;s#/#_#;" | tr "[a-z]" "[A-Z]")
+    if check_header "${f}"; then 
+		echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h
+	fi
 done
 
 for f in ${FUNC_CHECK}; do
-	def=$(echo ${f} | tr "[a-z]" "[A-Z]")
-	if check_func "${f}"; then echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h; fi
+	def=$(echo ${f} | cut -d: -f1 | tr "[a-z]" "[A-Z]")
+	if check_func "${f}"; then 
+		echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h
+	fi
 done
 
 # Create Makefile from template
@@ -247,3 +296,5 @@ __END
 cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > ${OBJDIR}/Makefile
 
 echo "Please type make to continue"
+
+wait
