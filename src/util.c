@@ -45,7 +45,7 @@ char *trim(char *str)
 	return ret;
 }
 
-int is_dot(char * const path)
+int is_dot(const char *path)
 {
 	if( !path || !*path ) return 0;
 
@@ -74,7 +74,7 @@ char *pathcat(const char *a, const char *b)
 	return ret;
 }
 
-int isnumber(char *t)
+int isnumber(const char *t)
 {
 	int i;
 

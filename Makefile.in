@@ -20,6 +20,7 @@ PACKAGE         := $(shell $(CAT) "$(srcdir)/misc/PACKAGE")
 INSTALL         := install -c
 INSTALL_PROGRAM := $(INSTALL)
 INSTALL_DATA    := $(INSTALL) -m 644
+HELP2MAN		:= help2man
 
 prefix      := @@PREFIX@@
 datarootdir := @@DATAROOTDIR@@
@@ -28,8 +29,11 @@ exec_prefix := @@EXECPREFIX@@
 bindir      := @@BINDIR@@
 sbindir     := @@SBINDIR@@
 libexecdir  := @@LIBEXECDIR@@
+docdir		:= @@DOCDIR@@
 infodir     := @@INFODIR@@
 libdir      := @@LIBDIR@@
+mandir		:= @@MANDIR@@
+localedir	:= @@LOCALEDIR@@
 
 all_SRCS     := $(wildcard $(srcdir)/src/*.c)
 all_HEADERS  := $(wildcard $(srcdir)/src/*.h)
@@ -39,10 +43,13 @@ CPPFLAGS += -MMD -MP -I$(objdir) -I$(srcdir)/src
 
 
 .PHONY: all
-all: $(objdir)/.d $(objdir)/$(PACKAGE)
+all: $(objdir)/.d $(objdir)/$(PACKAGE) $(objdir)/$(PACKAGE).8
 
 $(objdir)/.d:
 	@mkdir -p $(objdir)/.d 2>/dev/null
+
+$(objdir)/$(PACKAGE).8: $(objdir)/$(PACKAGE)
+	$(HELP2MAN) -N -s 8 -S 'ZeroDay Linux' $< > $@
 
 $(objdir)/$(PACKAGE): $(package_OBJS)
 	$(CC) $(LDFLAGS) $(package_OBJS) -o $@
@@ -53,10 +60,11 @@ $(objdir)/$(PACKAGE): $(package_OBJS)
 install: $(PACKAGE)
 	$(INSTALL_PROGRAM) $(objdir)/$(PACKAGE) $(DESTDIR)$(bindir)
 	$(INSTALL_DATA) $(srcdir)/misc/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
+	$(INSTALL_DATA) $(objdir)/$(PACKAGE).8 $(DESTDIR)$(mandir)/man8/
 
 uninstall:
-	rm -f $(DESTDIR)$(bindir)/$(PACKAGE)
-
+	$(RM) $(DESTDIR)$(bindir)/$(PACKAGE)
+	$(RM) $(DESTDIR)$(mandir)/man8/$(PACKAGE).8
 
 .PHONY: mostlyclean clean distclean maintainer-clean
 
@@ -64,6 +72,7 @@ mostlyclean:
 	$(RM) $(package_OBJS) $(objdir)/$(PACKAGE)
 
 clean: mostlyclean
+	$(RM) $(objdir)/$(PACKAGE).8
 
 distclean: clean
 	$(RM) config.log

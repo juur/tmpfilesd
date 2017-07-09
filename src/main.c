@@ -18,11 +18,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
+#include <stdbool.h>
 
 #include "config.h"
 #include "util.h"
-
-enum {false = 0, true = 1};
 
 #define	CREAT_FILE	0x00
 #define TRUNC_FILE	0x01
@@ -59,35 +58,39 @@ static char *machineid = NULL;
 static char *kernelrel = NULL;
 static char *bootid = NULL;
 
-
-static struct option long_options[] = {
-
-	{"create",			no_argument,		&do_create,		true},
-	{"clean",			no_argument,		&do_clean,		true},
-	{"remove",			no_argument,		&do_remove,		true},
-	{"boot",			no_argument,		&do_boot,		true},
-	{"prefix",			required_argument,	0,				'p'},
-	{"exclude-prefix",	required_argument,	0,				'e'},
-	{"root",			required_argument,	0,				'r'},
-	{"help",			no_argument,		&do_help,		true},
-	{"version",			no_argument,		&do_version,	true},
-
-	{0,0,0,0}
-};
-
-static void show_help()
+static void show_version()
 {
-	printf("Usage: tmpfilesd [OPTIONS..] [CONFIGURATION FILE...]\n\n");
+	printf("tmpfilesd %s\n", VERSION);
 	exit(EXIT_SUCCESS);
 }
 
-static int validate_type(char *raw, char *type, char *suff, int *boot_only)
+static void show_help()
+{
+	printf(
+"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
+"Manage tmpfiles entries\n\n"
+"  -h, --help                 show help\n"
+"      --version              show version number\n"
+"      --create               create or write to files\n"
+"      --clean                clean up files or folders\n"
+"      --remove               remove directories or filse\n"
+"      --boot                 also execute lines with a !\n"
+"      --prefix=PATH          only apply rules with a matching path\n"
+"      --exclude-prefix=PATH  ignores rules with paths that match\n"
+"      --root=ROOT            all paths including config will be prefixed\n"
+"\n"
+);
+	
+	exit(EXIT_SUCCESS);
+}
+
+static int validate_type(const char *raw, char *type, char *suff, int *boot_only)
 {
 	int l;
 
 	if (!raw || !boot_only || !type || !suff)
 		return -1;
-	
+
 	l = strlen(raw);
 
 	*boot_only = 0;
@@ -113,7 +116,7 @@ static int validate_type(char *raw, char *type, char *suff, int *boot_only)
 
 	return 0;
 }
-static uid_t vet_uid(char **t, int *defuid)
+static uid_t vet_uid(const char **t, int *defuid)
 {
 	if (!t || !*t || **t == '-') {
 		*defuid = 1;
@@ -135,7 +138,7 @@ static uid_t vet_uid(char **t, int *defuid)
 	return pw->pw_uid;
 }
 
-static gid_t vet_gid(char **t, int *defgid)
+static gid_t vet_gid(const char **t, int *defgid)
 {
 	if (!t || !*t || **t == '-') {
 		*defgid = 1;
@@ -158,7 +161,7 @@ static gid_t vet_gid(char **t, int *defgid)
 }
 
 
-static char *getbootid()
+static const char *getbootid()
 {
 	if (bootid)
 		return bootid;
@@ -184,19 +187,19 @@ static char *getbootid()
 }
 
 
-static char *getkernelrelease()
+static const char *getkernelrelease()
 {
 	if (kernelrel)
 		return kernelrel;
 
 	struct utsname *un;
 
-	if( (un = calloc(1, sizeof(struct utsname))) == NULL ) {
+	if ( !(un = calloc(1, sizeof(struct utsname))) ) {
 		warn("calloc");
 		return NULL;
 	}
 
-	if( uname(un) ) {
+	if ( uname(un) ) {
 		warn("uname");
 	} else {
 		kernelrel = strdup(un->release);
@@ -206,7 +209,7 @@ static char *getkernelrelease()
 	return kernelrel;
 }
 
-static char *gethost()
+static const char *gethost()
 {
 	if (hostname)
 		return hostname;
@@ -221,7 +224,7 @@ static char *gethost()
 	return hostname;
 }
 
-static char *getmachineid()
+static const char *getmachineid()
 {
 	if (machineid)
 		return machineid;
@@ -229,12 +232,12 @@ static char *getmachineid()
 	FILE *fp = NULL;
 	size_t ign = 0;
 
-	if( (fp = fopen("/etc/machine-id", "r")) == NULL) {
+	if ( !(fp = fopen("/etc/machine-id", "r")) ) {
 		warn("getmachineid");
 		return NULL;
 	}
 
-	if( getline(&machineid, &ign, fp) < 32 ) {
+	if ( getline(&machineid, &ign, fp) < 32 ) {
 		if (machineid) {
 			free(machineid);
 			machineid = NULL;
@@ -247,12 +250,12 @@ static char *getmachineid()
 }
 
 // FIXME implement '~'
-static int vet_mode(char **t, int *mask)
+static int vet_mode(const char **t, int *mask)
 {
 	if (!t || !*t || **t == '-')
 		return -1;
 
-	char *mod = *t;
+	const char *mod = *t;
 
 	if (*mod == '~') {
 		*mask = 1;
@@ -273,9 +276,12 @@ static int vet_mode(char **t, int *mask)
 #define LEN 1024
 static char *expand_path(char *path)
 {
+	if (!path)
+		return NULL;
+
 	char *buf = calloc(1, LEN+1);
 	char *ptr = path;
-	char *cpy;
+	const char *cpy;
 	char tmp;
 	int spos = 0, dpos = 0;
 
@@ -284,13 +290,14 @@ static char *expand_path(char *path)
 
 	while((tmp = ptr[spos]) && dpos < LEN)
 	{
-		if(tmp != '%') {
+		if (tmp != '%') {
 			buf[dpos++] = ptr[spos++];
 			continue;
 		}
 
 		tmp = ptr[++spos];
-		if(dpos >= LEN || !tmp) continue;
+		if (dpos >= LEN || !tmp) 
+			continue;
 
 		switch (tmp)
 		{
@@ -335,18 +342,18 @@ static char *vet_path(char *path)
 	if (strchr(path, '%'))
 		path = expand_path(path);
 
-	//	printf("path=%s\n", path);
 	return path;
 }
 
-static struct timeval *vet_age(char **t, int *subonly)
+static struct timeval *vet_age(const char **t, int *subonly)
 {
 	if (!t || !*t || **t == '-')
 		return NULL;
 
 	u_int64_t val;
 	int read, ret;
-	char *tmp = NULL, *src = *t;
+	char *tmp = NULL; 
+	const char *src = *t;
 
 	if (*src == '~') {
 		*subonly = 1;
@@ -390,19 +397,16 @@ static struct timeval *vet_age(char **t, int *subonly)
 		return NULL;
 	}
 
-
 	tv->tv_sec = (time_t)(val / 1000000);
 	tv->tv_usec = (suseconds_t)(val % 1000000);
 
 	if (tmp)
 		free(tmp);
 
-	//	printf("age={%u,%u}\n", tv->tv_sec, tv->tv_usec);
-
 	return(tv);
 }
 
-static int glob_file(char *path, char ***matches, size_t *count,
+static int glob_file(const char *path, char ***matches, size_t *count,
 		glob_t **pglob)
 {
 	int r;
@@ -434,20 +438,20 @@ static int glob_file(char *path, char ***matches, size_t *count,
 	return r;
 }
 
-static int unlinkfolder(char *path)
+static int unlinkfolder(const char *path)
 {
 	//printf("rm-rf %s\n", path);
 	errno = ENOSYS;
 	return -1;
 }
 
-static int dummyunlink(char *path)
+static int dummyunlink(const char *path)
 {
 	errno = EPERM;
 	return -1;
 }
 
-static int rmfile(char *path)
+static int rmfile(const char *path)
 {
 	if (!path) {
 		warnx("path is NULL");
@@ -463,15 +467,15 @@ static int rmfile(char *path)
 	return 0;
 }
 
-static void rmifold(char *path, struct timeval *tv)
+static void rmifold(const char *path, struct timeval *tv)
 {
 	if ( !path || !tv || !*path )
 		return;
 
 	struct stat sb;
-	int fd = open(path, O_RDONLY);
+	int fd;
 
-	if (fd == -1) {
+	if ( (fd = open(path, O_RDONLY)) == -1) {
 		warn("open(%s)", path);
 		return;
 	}
@@ -481,6 +485,8 @@ static void rmifold(char *path, struct timeval *tv)
 		warn("fstat(%s)", path);
 		return;
 	}
+
+	close(fd);
 
 	if (S_ISDIR(sb.st_mode)) {
 		errno = ENOSYS;
@@ -497,13 +503,19 @@ static void rmifold(char *path, struct timeval *tv)
 	printf("rmifold(%s, %ld)\n", path, tv->tv_sec);
 }
 
-static int rmrf(char *path)
+static int rmrf(const char *path)
 {
-	char *buf;
-	struct stat sb;
-	int fd = open(path, O_RDONLY);
+	if (!path) {
+		errno = EINVAL;
+		return -1;
+	}
 
-	if (fd == -1) return fd;
+	char *buf = NULL;
+	struct stat sb;
+	int fd = -1;
+
+	if ( (fd = open(path, O_RDONLY)) == -1) 
+		return fd;
 
 	if (fstat(fd, &sb) == -1) {
 		close(fd);
@@ -540,6 +552,7 @@ static int rmrf(char *path)
 			return -1;
 
 	} else {
+		// FIXME set errno?
 		printf("not a dir\n");
 		return rmfile(path);
 	}
@@ -548,16 +561,20 @@ static int rmrf(char *path)
 }
 
 /*
-struct action actions = {
-	// ?,	mode,		replace?
-	{ 'f',	CREAT_FILE,	false,	
+   struct action actions = {
+// ?,	mode,		replace?
+{ 'f',	CREAT_FILE,	false,	
 };
 */
 
-static void process_line(char *line)
+static void process_line(const char *line)
 {
-	char *rawtype=NULL, *path=NULL, *modet=NULL;
-	char *uidt=NULL, *gidt=NULL, *aget=NULL, *arg=NULL;
+	if (line == NULL) 
+		return;
+
+	char *rawtype = NULL, *path = NULL; 
+	char *modet = NULL;
+	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
 	char type, suff = '\0';
 	int boot_only = 0, act = -1, subonly = 0;
 	int fields = 0;
@@ -569,20 +586,17 @@ static void process_line(char *line)
 	gid_t gid = 0; int defgid = 0;
 	mode_t mode = 0; int mask = 0;
 	dev_t dev = 0;
-	struct timeval *age = NULL;
 
-	if (line == NULL) return;
+	struct timeval *age = NULL;
 
 	fields = sscanf(line, 
 			"%ms %ms %ms %ms %ms %ms %m[^\n]s",
 			&rawtype, &path, &modet, &uidt, &gidt, &aget, &arg);
 
-	//	printf("%s\n", line);
-
-	if( (fields < 2) ) {
+	if ( fields < 2 ) {
 		warnx("bad line: %s\n", line);
 		return;
-	} else if( validate_type(rawtype, &type, &suff, &boot_only) ) {
+	} else if ( validate_type(rawtype, &type, &suff, &boot_only) ) {
 		warnx("bad type: %s\n", line);
 		return;
 	} else {
@@ -615,15 +629,15 @@ static void process_line(char *line)
 		}
 	}
 
-	if (uidt) uid = vet_uid(&uidt, &defuid);
-	if (gidt) gid = vet_gid(&gidt, &defgid);
-	if (modet) mode = vet_mode(&modet,&mask);
+	if (uidt) uid = vet_uid((const char **)&uidt, &defuid);
+	if (gidt) gid = vet_gid((const char **)&gidt, &defgid);
+	if (modet) mode = vet_mode((const char **)&modet,&mask);
 	// FIXME handle '~'
-	if (aget) age = vet_age(&aget, &subonly);
+	if (aget) age = vet_age((const char **)&aget, &subonly);
 	if (path) path = vet_path(path);
 
 	int i, fd = -1;
-	
+
 	if ( (do_boot && boot_only) || !boot_only ) {
 		switch(act)
 		{
@@ -716,14 +730,14 @@ static void process_line(char *line)
 						DIR *dirp = opendir(path);
 						struct dirent *dirent;
 						char *buf;
-						
+
 						if (!dirp) break;
 
 						while ( (dirent = readdir(dirp)) != NULL )
 						{
 							if ( is_dot(dirent->d_name) )
 								continue;
-							
+
 							if ( (buf = pathcat(path, dirent->d_name)) )
 							{
 								rmifold(buf, age);
@@ -802,9 +816,9 @@ static void process_line(char *line)
 					if (fd == -1)
 						warn("symlink(%s, %s)", arg, path);
 					else {
-						if(fchown(fd, uid, gid))
+						if (fchown(fd, uid, gid))
 							warn("fchown(%s)", path);
-						if(fchmod(fd, mode))
+						if (fchmod(fd, mode))
 							warn("fchmod(%s)", path);
 					}
 				}
@@ -832,25 +846,34 @@ static void process_line(char *line)
 				}
 				printf("path=%s %s\n", path, arg);
 				printf("blk\n\n");
+				break;
 			default:
 				printf("%c fields=%u\n", type, fields);
 				break;
 		}
 	}
 
-	if (fd != -1) close(fd);
-	if (rawtype) free(rawtype);
-	if (path) free(path);
-	if (modet) free(modet);
-	if (uidt) free(uidt);
-	if (gidt) free(gidt);
-	if (aget) free(aget);
-	if (arg) free(arg);
-	if (fileglob) globfree(fileglob);
-
+	if (fd != -1) 
+		close(fd);
+	if (rawtype) 
+		free(rawtype);
+	if (path) 
+		free(path);
+	if (modet) 
+		free(modet);
+	if (uidt) 
+		free(uidt);
+	if (gidt)
+		free(gidt);
+	if (aget) 
+		free(aget);
+	if (arg) 
+		free(arg);
+	if (fileglob) 
+		globfree(fileglob);
 }
 
-static void process_file(char *file, char *folder)
+static void process_file(const char *file, const char *folder)
 {
 	char *in = NULL;
 	int len = 0;
@@ -901,19 +924,19 @@ static void process_file(char *file, char *folder)
 #define CFG_EXT ".conf"
 #define CFG_EXT_LEN sizeof(CFG_EXT)
 
-static void process_folder(char *folder)
+static void process_folder(const char *folder)
 {
 	DIR *dirp;
 	struct dirent *dirent;
 	int len;
 
 	printf("checking folder: %s\n", folder);
-	if( (dirp = opendir(folder)) == NULL ) {
+	if ( !(dirp = opendir(folder)) ) {
 		warn("opendir");
 		return;
 	}
 
-	while( (dirent = readdir(dirp)) != NULL )
+	while( (dirent = readdir(dirp)) )
 	{
 		if ( is_dot(dirent->d_name) )
 			continue;
@@ -928,6 +951,22 @@ static void process_folder(char *folder)
 
 #undef CFG_EXT
 #undef CFG_EXT_LEN
+
+static struct option long_options[] = {
+
+	{"create",			no_argument,		&do_create,		true},
+	{"clean",			no_argument,		&do_clean,		true},
+	{"remove",			no_argument,		&do_remove,		true},
+	{"boot",			no_argument,		&do_boot,		true},
+	{"prefix",			required_argument,	0,				'p'},
+	{"exclude-prefix",	required_argument,	0,				'e'},
+	{"root",			required_argument,	0,				'r'},
+	{"help",			no_argument,		&do_help,		true},
+	{"version",			no_argument,		&do_version,	true},
+
+	{0,0,0,0}
+};
+
 
 int main(int argc, char * const argv[])
 {
@@ -959,6 +998,8 @@ int main(int argc, char * const argv[])
 			case '?':
 				fail = 1;
 				break;
+			case 0:
+				break;
 			default:
 				break;
 		}
@@ -980,6 +1021,9 @@ int main(int argc, char * const argv[])
 	if (do_help)
 		show_help();
 
+	if (do_version)
+		show_version();
+
 	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,do_remove=%d,do_boot=%d\n",
 			do_clean, do_clean, do_remove, do_boot);
 
@@ -989,7 +1033,6 @@ int main(int argc, char * const argv[])
 
 	for (int i = 0; i < num_config_files; i++)
 		process_file(config_files[i], NULL);
-
 
 	exit(EXIT_SUCCESS);
 }

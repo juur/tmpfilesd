@@ -32,6 +32,7 @@ make %{?_smp_mflags}
 mkdir -p %{buildroot}%{_bindir}
 mkdir -p %{buildroot}%{_sysconfdir}/tmpfiles.d
 mkdir -p %{buildroot}%{_prefix}/lib/tmpfiles.d
+mkdir -p %{buildroot}%{_mandir}/man8
 %make_install
 
 mkdir -p %{buildroot}%{_initrddir}
@@ -43,6 +44,7 @@ install -T -m 755 misc/%{name}.init %{buildroot}%{_initrddir}/%{name}
 %{_bindir}/*
 %dir %{_sysconfdir}/tmpfiles.d/
 %{_prefix}/lib/tmpfiles.d/*
+%{_mandir}/*/*.*
 %doc COPYING README.md
 
 %files sysvinit

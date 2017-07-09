@@ -5,7 +5,7 @@ set -o pipefail
 set -o nounset
 
 # log all of the scripts output to config.log
-exec &> >(tee -a config.log)
+exec &> >(tee config.log)
 
 show_help() {
 	cat <<EOF
@@ -14,19 +14,22 @@ Configuration:
   --help                    print this message
   --target=TARGET           cross-compile target
 Directory and file names:
-  --prefix=DIR
-  --exec-prefix=DIR
   --bindir=DIR
-  --sbindir=DIR
-  --libexecdir=DIR
-  --sysconfdir=DIR
-  --libdir=DIR
-  --includedir=DIR
-  --datarootdir=DIR
   --datadir=DIR
-  --mandir=DIR
+  --datarootdir=DIR
+  --docdir=DIR
+  --exec-prefix=DIR
+  --includedir=DIR
+  --infodir=DIR
+  --libdir=DIR
+  --libexecdir=DIR
+  --localedir=DIR
   --localstatedir=DIR
+  --mandir=DIR
+  --prefix=DIR
+  --sbindir=DIR
   --sharedstatedir=DIR
+  --sysconfdir=DIR
 
 EOF
 }
@@ -34,21 +37,22 @@ EOF
 while :; do
 	case ${1:-} in
 		-h|--help) show_help; exit ;;
-		--prefix=?*) PREFIX=${1#*=} ;;
-		--exec-prefix=?*) EXECPREFIX=${1#*=} ;;
 		--bindir=?*) BINDIR=${1#*=} ;;
-		--sbindir=?*) SBINDIR=${1#*=} ;;
-		--libexecdir=?*) LIBEXECDIR=${1#*=} ;;
-		--sysconfdir=?*) SYSCONFDIR=${1#*=} ;;
-		--libdir=?*) LIBDIR=${1#*=} ;;
-		--includedir=?*) INCLUDEDIR=${1#*=} ;;
-		--datarootdir=?*) DATAROOTDIR=${1#*=} ;;
 		--datadir=?*) DATADIR=${1#*=} ;;
-		--infodir=?*) INFODIR=${1#*=} ;;
-		--mandir=?*) MANDIR=${1#*=} ;;
+		--datarootdir=?*) DATAROOTDIR=${1#*=} ;;
 		--docdir=?*) DOCDIR=${1#*=} ;;
+		--exec-prefix=?*) EXECPREFIX=${1#*=} ;;
+		--includedir=?*) INCLUDEDIR=${1#*=} ;;
+		--infodir=?*) INFODIR=${1#*=} ;;
+		--libdir=?*) LIBDIR=${1#*=} ;;
+		--libexecdir=?*) LIBEXECDIR=${1#*=} ;;
+		--localedir=?*) LOCALEDIR=${1#*=} ;;
 		--localstatedir=?*) LOCALSTATEDIR=${1#*=} ;;
+		--mandir=?*) MANDIR=${1#*=} ;;
+		--prefix=?*) PREFIX=${1#*=} ;;
+		--sbindir=?*) SBINDIR=${1#*=} ;;
 		--sharedstatedir=?*) SHAREDSTATEDIR=${1#*=} ;;
+		--sysconfdir=?*) SYSCONFDIR=${1#*=} ;;
 		--target=?*) TARGET=${1#*=} ;;
 #		--=?*) =${1#*=} ;;
 		*) [ -n "${1-}" ] && echo "Unknown argument ${1}" >&2 ;;
@@ -65,21 +69,22 @@ fi
 
 # Default file locations, or use env provided ones
 
-PREFIX=${PREFIX:-/usr/local}
-EXECPREFIX=${EXECPREFIX:-\$(prefix)}
-SYSCONFDIR=${SYSCONFDIR:-\$(prefix)/etc}
 BINDIR=${BINDIR:-\$(exec_prefix)/bin}
-INCLUDEDIR=${INCLUDEDIR:-\$(prefix)/include}
-LIBDIR=${LIBDIR:-\$(prefix)/lib}
-SBINDIR=${SBINDIR:-\$(exec_prefix)/sbin}
-DATAROOTDIR=${DATAROOTDIR:-\$(prefix)/share}
 DATADIR=${DATADIR:-\$(datarootdir)}
+DATAROOTDIR=${DATAROOTDIR:-\$(prefix)/share}
 DOCDIR=${DOCDIR:-\$(datarootdir)/doc}
-MANDIR=${MANDIR:-\$(datarootdir)/man}
+EXECPREFIX=${EXECPREFIX:-\$(prefix)}
+INCLUDEDIR=${INCLUDEDIR:-\$(prefix)/include}
 INFODIR=${INFODIR:-\$(datarootdir)/info}
+LIBDIR=${LIBDIR:-\$(prefix)/lib}
 LIBEXECDIR=${LIBEXECDIR:-\$(exec_prefix)/libexec}
+LOCALEDIR=${LOCALEDIR:-\$(datarootdir)/locale}
 LOCALSTATEDIR=${LOCALSTATEDIR:-\$(prefix)/var}
+MANDIR=${MANDIR:-\$(datarootdir)/man}
+PREFIX=${PREFIX:-/usr/local}
+SBINDIR=${SBINDIR:-\$(exec_prefix)/sbin}
 SHAREDSTATEDIR=${SHAREDSTATEDIR:-\$(prefix)/var/lib}
+SYSCONFDIR=${SYSCONFDIR:-\$(prefix)/etc}
 TARGET=${TARGET:-}
 
 if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
@@ -116,7 +121,7 @@ fi
 
 echo -n "Checking $(basename ${CC}) can produce executables ... "
 echo -e '#include <stdlib.h>\nmain() {exit(0);}' | \
-	gcc -xc -o /dev/null - 2>&1 && echo "Ok" || { echo "Fail"; exit 1; }
+	gcc -xc -o /dev/null - 2>>config.log && echo "Ok" || { echo "Fail"; exit 1; }
 
 HOST_MACHINE=$(${CC} -dumpmachine)
 
@@ -130,7 +135,7 @@ echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
 # List of system headers we need to check for
 
-H_FILES="stdlib.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h"
+H_FILES="stdlib.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h"
 
 # List of system functions to check for function:arg0,arg1
 
@@ -271,25 +276,26 @@ done
 echo "Writing Makefile"
 
 ARGS=$(cat <<- __END
-    s#@@PREFIX@@#${PREFIX}#;
-	s#@@EXECPREFIX@@#${EXECPREFIX}#;
-	s#@@SYSCONFDIR@@#${SYSCONFDIR}#;
 	s#@@BINDIR@@#${BINDIR}#;
-	s#@@SBINDIR@@#${SBINDIR}#;
+	s#@@CC@@#${CC}#;
+	s#@@CFLAGS@@#${CFLAGS}#;
+	s#@@CXX@@#${CXX}#;
 	s#@@DATADIR@@#${DATADIR}#;
 	s#@@DATAROOTDIR@@#${DATAROOTDIR}#;
 	s#@@EXECPREFIX@@#${EXECPREFIX}#;
-	s#@@LIBEXECDIR@@#${LIBEXECDIR}#;
 	s#@@INFODIR@@#${INFODIR}#;
-	s#@@LIBDIR@@#${LIBDIR}#;
-	s#@@LOCALSTATEDIR@@#${LOCALSTATEDIR}#;
-	s#@@SHAREDSTATEDIR@@#${SHAREDSTATEDIR}#;
-	s#@@CFLAGS@@#${CFLAGS}#;
 	s#@@LDFLAGS@@#${LDFLAGS}#;
-	s#@@CC@@#${CC}#;
-	s#@@CXX@@#${CXX}#;
-	s#@@SRCDIR@@#${SRCDIR}#;
+	s#@@LIBDIR@@#${LIBDIR}#;
+	s#@@LIBEXECDIR@@#${LIBEXECDIR}#;
+	s#@@LOCALEDIR@@#${LOCALEDIR}#;
+	s#@@LOCALSTATEDIR@@#${LOCALSTATEDIR}#;
+	s#@@MANDIR@@#${MANDIR}#;
+    s#@@PREFIX@@#${PREFIX}#;
 	s#@@OBJDIR@@#${OBJDIR}#;
+	s#@@SBINDIR@@#${SBINDIR}#;
+	s#@@SHAREDSTATEDIR@@#${SHAREDSTATEDIR}#;
+	s#@@SRCDIR@@#${SRCDIR}#;
+	s#@@SYSCONFDIR@@#${SYSCONFDIR}#;
 __END
 )
 
