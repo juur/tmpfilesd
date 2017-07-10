@@ -5,3 +5,6 @@
 Makefile
 config.h
 tmpfilesd
+tmpfilesd.8
+*.swp
+config.log
