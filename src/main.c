@@ -49,6 +49,9 @@
 
 #define MAX(a, b) (a < b ? b : a)
 
+#define DEF_FILE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
+#define DEF_FOLD (DEF_FILE|S_IXUSR|S_IXGRP|S_IXOTH)
+
 static int do_create=0, do_clean=0, do_remove=0, do_boot=0, do_help=0, do_version=0; 
 static char *prefix = NULL, *exclude = NULL, *root = NULL;
 static char **config_files = NULL;
@@ -250,10 +253,14 @@ static const char *getmachineid()
 }
 
 // FIXME implement '~'
-static int vet_mode(const char **t, int *mask)
+static int vet_mode(const char **t, int *mask, int *defmode)
 {
-	if (!t || !*t || **t == '-')
+	if (!t || !*t || **t == '-') {
+		*defmode = 1;
 		return -1;
+	}
+
+	*defmode = 0;
 
 	const char *mod = *t;
 
@@ -270,7 +277,8 @@ static int vet_mode(const char **t, int *mask)
 		return -1;
 	}
 
-	return 0;
+	// FIXME this is wrong :-(
+	return strtol(mod, NULL, 8);
 }
 
 #define LEN 1024
@@ -572,12 +580,12 @@ static void process_line(const char *line)
 	if (line == NULL) 
 		return;
 
-	char *rawtype = NULL, *path = NULL; 
-	char *modet = NULL;
+	char *rawtype = NULL, *tmppath = NULL, *path = NULL; 
+	char *modet = NULL, *dest = NULL;
 	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
 	char type, suff = '\0';
 	int boot_only = 0, act = -1, subonly = 0;
-	int fields = 0;
+	int fields = 0, defmode = 0;
 	char **globs = NULL;
 	size_t nglobs = 0;
 	glob_t *fileglob = NULL;
@@ -591,7 +599,7 @@ static void process_line(const char *line)
 
 	fields = sscanf(line, 
 			"%ms %ms %ms %ms %ms %ms %m[^\n]s",
-			&rawtype, &path, &modet, &uidt, &gidt, &aget, &arg);
+			&rawtype, &tmppath, &modet, &uidt, &gidt, &aget, &arg);
 
 	if ( fields < 2 ) {
 		warnx("bad line: %s\n", line);
@@ -629,9 +637,12 @@ static void process_line(const char *line)
 		}
 	}
 
+	path = pathcat(root, tmppath);
+	free(tmppath);
+
 	if (uidt) uid = vet_uid((const char **)&uidt, &defuid);
 	if (gidt) gid = vet_gid((const char **)&gidt, &defgid);
-	if (modet) mode = vet_mode((const char **)&modet,&mask);
+	if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode);
 	// FIXME handle '~'
 	if (aget) age = vet_age((const char **)&aget, &subonly);
 	if (path) path = vet_path(path);
@@ -645,8 +656,9 @@ static void process_line(const char *line)
 				glob_file(path, &globs, &nglobs, &fileglob);
 				if (do_create || do_clean)
 				{
+					dest = pathcat(root, arg);
 					for (i=0; i<nglobs; i++) {
-						printf("[%u] write %s=%s %s%s", i, path, arg, 
+						printf("[%u] write %s=%s %s%s", i, path, dest, 
 								do_clean ? "clean " : "",
 								do_create ? "create " : "");
 						if (do_clean && age)
@@ -654,7 +666,7 @@ static void process_line(const char *line)
 						puts("\n");
 					}
 				}
-				printf("write\n\n");
+				//printf("write\n\n");
 				break;
 			case RM:
 			case RMRF:
@@ -669,7 +681,7 @@ static void process_line(const char *line)
 					} else rmfile(globs[i]);
 
 				}
-				printf("rm/rmrf\n\n");
+				//printf("rm/rmrf\n\n");
 				break;
 			case IGN:
 			case IGNR:
@@ -679,45 +691,63 @@ static void process_line(const char *line)
 					printf("[%u] ignore/r %s\n", 
 							i, globs[i]);
 				}
-				printf("ignr/ign\n\n");
+				//printf("ignr/ign\n\n");
 				break;
 			case CHMOD:
 			case CHMODR:
 				glob_file(path, &globs, &nglobs, &fileglob);
+				struct stat sb;
 				if (do_create) {
+					mode_t mmode = mode;
+
+					if (defmode) {
+						if (stat(globs[i], &sb) == -1)
+							warn("stat(%s)", globs[i]);
+						else {
+							if (S_ISDIR(sb.st_mode)) 
+								mmode = DEF_FOLD;
+							else
+								mmode = DEF_FILE;
+						}
+					} 
+
 					for (i=0; i<nglobs; i++) {
 						if (mask) {
 							errno = ENOSYS;
 							warn("chmod(%s,%s)", globs[i], modet);
 						} else {
-							if (chmod(globs[i], mode))
+							warnx("chmod(%s,%u)", globs[i], mmode);
+													
+							if (chmod(globs[i], mmode))
 								warn("chmod(%s,%s)", globs[i], modet);
 						}
 						if (chown(globs[i], defuid ? -1 : uid, defgid ? -1 : gid))
 							warn("chown(%s,%s,%s)", globs[i], uidt, gidt);
 					}
 				}
-				printf("chmod/chmodr\n\n");
+				//printf("chmod/chmodr\n\n");
 				break;
 			case CHATTR:
 			case CHATTRR:
 				glob_file(path, &globs, &nglobs, &fileglob);
 				if (do_create) {
+					dest = pathcat(root, arg);
 					for (i=0; i<nglobs; i++) {
-						printf("[%u] path=%s arg=%s\n", i, globs[i], arg);
+						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
 					}
 				}
-				printf("chattr/chattrr\n\n");
+				//printf("chattr/chattrr\n\n");
 				break;
 			case ACL:
 			case ACLR:
 				glob_file(path, &globs, &nglobs, &fileglob);
 				if (do_create) {
+					dest = pathcat(root, arg);
 					for (i=0; i<nglobs; i++) {
-						printf("[%u] path=%s arg=%s\n", i, globs[i], arg);
+						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
 					}
 				}
-				printf("acl/aclr\n\n");
+				//printf("acl/aclr\n\n");
 				break;
 			case CREATE_SVOL:
 				errno = ENOSYS;
@@ -725,7 +755,7 @@ static void process_line(const char *line)
 			case MKDIR:
 			case MKDIR_RMF:
 				if (do_clean && age) {
-					printf("mkdir do_clean age=%lu\n", age->tv_sec);
+					//printf("mkdir do_clean age=%lu\n", age->tv_sec);
 					if (subonly) {
 						DIR *dirp = opendir(path);
 						struct dirent *dirent;
@@ -752,14 +782,18 @@ static void process_line(const char *line)
 				}
 
 				if (do_create) {
+					printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, aget);
+					printf("MKDIR %s [%d] %lu %lu %lu %lu\n", path, defmode, (defmode ? DEF_FOLD : mode), uid, gid, age);
 					fd = open(path, O_DIRECTORY|O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
 					else if (fd != -1 && !(act&0x1)) break;
 					else if (fd != -1 && rmrf(path))
 						warn("rmrf(%s)", path);
-					close(fd);
+					
+					if (fd != -1)
+						close(fd);
 
-					fd = mkdir(path, mode);
+					fd = mkdir(path, (defmode ? DEF_FOLD : mode));
 					if (fd == -1)
 						warn("mkdir(%s)", path);
 					else if (fchown(fd, uid, gid))
@@ -767,24 +801,25 @@ static void process_line(const char *line)
 				}
 
 				//printf("path=%s\n", path);
-				printf("mkdir\n\n");
+				//printf("mkdir\n\n");
 				break;
 			case CREAT_FILE:
 			case TRUNC_FILE:
 				if (do_create) {
-					fd = open(path, O_CREAT|(act&0x1?O_TRUNC:0),mode);
+					fd = open(path, O_CREAT|(act&0x1?O_TRUNC:0),(defmode ? DEF_FILE : mode));
 					if (fd == -1) warn("open(%s)", path);
 					else if (fchown(fd, uid, gid))
 						warn("fchown(%s)", path);
 				}
-				printf("creat/runc\n\n");
+				//printf("creat/runc\n\n");
 				break;
 			case COPY:
 				if (do_create) {
-					printf("src=%s\n", arg);
+					dest = pathcat(root, arg);
+					printf("src=%s\n", dest);
 				}
-				printf("path=%s\n", path);
-				printf("copy\n\n");
+				//printf("path=%s\n", path);
+				//printf("copy\n\n");
 				break;
 			case CREATE_PIPE:
 				if (do_create) {
@@ -792,38 +827,45 @@ static void process_line(const char *line)
 					if (fd == -1 && errno != ENOENT) break;
 					else if (fd != -1 && suff != '~') break;
 					else if (fd != -1) dummyunlink(path);
-					close(fd);
+
+					if (fd != -1)
+						close(fd);
 
 					if ( (fd = mkfifo(path, mode)) )
 						warn("mkfifo(%s)", path);
 					else if (fchown(fd, uid, gid))
 						warn("fchown(%s)", path);
 				}
-				//printf("path=%s %s\n", path, arg);
-				printf("pipe\n\n");
+				//printf("path=%s %s\n", path, dest);
+				//printf("pipe\n\n");
 				break;
-			case CREATE_SYM: // FIXME handle NULL arg => /usr/share/factory
+			case CREATE_SYM: // FIXME handle NULL dest => /usr/share/factory
 				if (do_create) {
+					if (strncmp("../", arg, 3) )
+						dest = pathcat(root, arg);
+					else
+						dest = strdup(arg);
+
 					fd = open(path, O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
 					else if (fd != -1 && suff != '~') break;
 					else if (fd != -1 && dummyunlink(path)) 
 						warn("unlink(%s)", path);
+					if (fd != -1)
+						close(fd);
 
-					close(fd);
-
-					fd = symlink(arg, path);
+					fd = symlink(dest, path);
 					if (fd == -1)
-						warn("symlink(%s, %s)", arg, path);
+						warn("symlink(%s, %s)", dest, path);
 					else {
 						if (fchown(fd, uid, gid))
 							warn("fchown(%s)", path);
-						if (fchmod(fd, mode))
+						if (fchmod(fd, (defmode ? DEF_FOLD : mode)))
 							warn("fchmod(%s)", path);
 					}
 				}
-				//printf("path=%s => %s\n", path, arg);
-				printf("sym\n\n");
+				//printf("path=%s => %s\n", path, dest);
+				//printf("sym\n\n");
 				break;
 			case CREATE_CHAR:
 				if (do_create) {
@@ -831,24 +873,27 @@ static void process_line(const char *line)
 					if (fd == -1 && errno != ENOENT) break;
 					if (fd != -1 && suff != '~') break;
 					else if (fd != -1) dummyunlink(path);
-					close(fd);
 
-					if ( (fd = mknod(path, mode|S_IFCHR, dev)) )
+					if (fd != -1)
+						close(fd);
+
+					if ( (fd = mknod(path, (defmode ? DEF_FILE : mode)|S_IFCHR, dev)) )
 						warn("mknod(%s)", path);
 					else if (fchown(fd, uid, gid))
 						warn("fchown(%s)", path);
 				}
-				//printf("path=%s %s\n", path, arg);
-				printf("char\n\n");
+				//printf("path=%s %s\n", path, dest);
+				//printf("char\n\n");
 				break;
 			case CREATE_BLK:
 				if (do_create) {
+					dest = pathcat(root, arg);
 				}
-				printf("path=%s %s\n", path, arg);
-				printf("blk\n\n");
+				//printf("path=%s %s\n", path, dest);
+				//printf("blk\n\n");
 				break;
 			default:
-				printf("%c fields=%u\n", type, fields);
+				//printf("%c fields=%u\n", type, fields);
 				break;
 		}
 	}
@@ -869,6 +914,8 @@ static void process_line(const char *line)
 		free(aget);
 	if (arg) 
 		free(arg);
+	if (dest)
+		free(dest);
 	if (fileglob) 
 		globfree(fileglob);
 }
@@ -897,7 +944,7 @@ static void process_file(const char *file, const char *folder)
 		in = strdup(file);
 	}
 
-	printf("processing %s\n", in);
+	//printf("processing %s\n", in);
 
 	FILE *fp;
 
@@ -930,7 +977,7 @@ static void process_folder(const char *folder)
 	struct dirent *dirent;
 	int len;
 
-	printf("checking folder: %s\n", folder);
+	//printf("checking folder: %s\n", folder);
 	if ( !(dirp = opendir(folder)) ) {
 		warn("opendir");
 		return;
@@ -1024,15 +1071,19 @@ int main(int argc, char * const argv[])
 	if (do_version)
 		show_version();
 
-	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,do_remove=%d,do_boot=%d\n",
-			do_clean, do_clean, do_remove, do_boot);
+	if (!root)
+		root = "";
 
-	process_folder("/etc/tmpfiles.d");
-	process_folder("/run/tmpfiles.d");
-	process_folder("/usr/lib/tmpfiles.d");
+	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,do_remove=%d,do_boot=%d\nroot=%s\n",
+			do_clean, do_clean, do_remove, do_boot,
+			root);
+
+	process_folder(pathcat(root, "/etc/tmpfiles.d"));
+	process_folder(pathcat(root, "/run/tmpfiles.d"));
+	process_folder(pathcat(root, "/usr/lib/tmpfiles.d"));
 
 	for (int i = 0; i < num_config_files; i++)
-		process_file(config_files[i], NULL);
+		process_file(pathcat(root, config_files[i]), NULL);
 
 	exit(EXIT_SUCCESS);
 }

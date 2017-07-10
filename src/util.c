@@ -68,7 +68,8 @@ char *pathcat(const char *a, const char *b)
 	}
 
 	strncpy(ret, a, len);
-	strncpy(ret, "/", len);
+	if ( *b != '/' && a[strlen(a)-1] != '/')
+		strncat(ret, "/", len);
 	strncat(ret, b, len);
 
 	return ret;
