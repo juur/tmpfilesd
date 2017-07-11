@@ -4,8 +4,6 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-# log all of the scripts output to config.log
-exec &> >(tee config.log)
 
 show_help() {
 	cat <<EOF
@@ -34,9 +32,13 @@ Directory and file names:
 EOF
 }
 
+QUIET=0
+DEPS=1
+
 while :; do
 	case ${1:-} in
 		-h|--help) show_help; exit ;;
+		--quiet) QUIET=1 ;;
 		--bindir=?*) BINDIR=${1#*=} ;;
 		--datadir=?*) DATADIR=${1#*=} ;;
 		--datarootdir=?*) DATAROOTDIR=${1#*=} ;;
@@ -54,11 +56,24 @@ while :; do
 		--sharedstatedir=?*) SHAREDSTATEDIR=${1#*=} ;;
 		--sysconfdir=?*) SYSCONFDIR=${1#*=} ;;
 		--target=?*) TARGET=${1#*=} ;;
-#		--=?*) =${1#*=} ;;
+# These are added to keep RPM %configure error free		
+		--build=?*) BUILD=${1#*=} ;;
+		--host=?*) HOST=${1#*=} ;;
+		--program-prefix=?*) PROGPREFIX=${1#*=} ;;
+		--program-prefix=) PROGPREFIX= ;;
+		--disable-dependency-tracking) DEPS=0 ;;
+		--enable-dependency-tracking) DEPS=1 ;;
 		*) [ -n "${1-}" ] && echo "Unknown argument ${1}" >&2 ;;
 	esac
 	shift || break
 done
+
+# log all of the scripts output to config.log
+if [[ ${QUIET} == 0 ]]; then
+	exec &> >(tee config.log)
+else
+	exec &>config.log
+fi
 
 OBJDIR=$(pwd)
 SRCDIR=$(dirname ${0})
@@ -276,6 +291,7 @@ done
 echo "Writing Makefile"
 
 ARGS=$(cat <<- __END
+	s#@@DEPS@@#${DEPS}#;
 	s#@@BINDIR@@#${BINDIR}#;
 	s#@@CC@@#${CC}#;
 	s#@@CFLAGS@@#${CFLAGS}#;

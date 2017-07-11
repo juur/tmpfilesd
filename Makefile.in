@@ -21,6 +21,7 @@ INSTALL         := install -c
 INSTALL_PROGRAM := $(INSTALL)
 INSTALL_DATA    := $(INSTALL) -m 644
 HELP2MAN		:= help2man
+DEPS			:= @@DEPS@@
 
 prefix      := @@PREFIX@@
 datarootdir := @@DATAROOTDIR@@
@@ -39,7 +40,10 @@ all_SRCS     := $(wildcard $(srcdir)/src/*.c)
 all_HEADERS  := $(wildcard $(srcdir)/src/*.h)
 package_OBJS := $(addprefix $(objdir)/,$(notdir $(all_SRCS:.c=.o)))
 
-CPPFLAGS += -MMD -MP -I$(objdir) -I$(srcdir)/src
+ifeq ($(DEPS),1)
+CPPFLAGS += -MMD -MP
+endif
+CPPFLAGS += -I$(objdir) -I$(srcdir)/src
 
 
 .PHONY: all
@@ -93,7 +97,13 @@ dist:
 	popd >/dev/null
 
 $(objdir)/%.o: $(srcdir)/src/%.c
+ifeq ($(DEPS),1)
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) -MF $(objdir)/.d/$*.d $< -o $@
+else	
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
+endif
 
+ifeq ($(DEPS),1)
 -include $(all_SRCS:$(srcdir)/src/%.c=$(objdir)/.d/%.d)
+endif
 
