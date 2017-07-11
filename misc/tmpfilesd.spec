@@ -9,7 +9,8 @@ Conflicts:	systemd
 
 %package sysvinit
 Summary:	%{name} sysvinit scripts
-Requires:	initscripts 
+Requires:	initscripts
+Requires:	chkconfig
 Requires:	%{name}
 BuildArch:	noarch
 
@@ -38,15 +39,28 @@ mkdir -p %{buildroot}%{_mandir}/man8
 mkdir -p %{buildroot}%{_initrddir}
 install -T -m 755 misc/%{name}.init %{buildroot}%{_initrddir}/%{name}
 
+mkdir -p %{buildroot}%{_sysconfdir}/sysconfig
+install -T -m 644 misc/%{name}.sysconfig %{buildroot}%{_sysconfdir}/sysconfig/%{name}
+
+mkdir -p %{buildroot}%{_sysconfdir}/cron.d
+install -T -m 644 misc/%{name}.cron %{buildroot}%{_sysconfdir}/cron.d/%{name}
+
+%post sysvinit
+[[ ${1} == 0 ]] && chkconfig --add %{name}
+
+%preun sysvinit
+[[ ${1} == 0 ]] && chkconfig --delete %{name}
 
 %files
 %defattr(-,root,root,-)
 %{_bindir}/*
-%dir %{_sysconfdir}/tmpfiles.d/
 %{_prefix}/lib/tmpfiles.d/*
 %{_mandir}/*/*.*
+%dir %{_sysconfdir}/tmpfiles.d/
+%{_sysconfdir}/cron.d/*
 %doc COPYING README.md
 
 %files sysvinit
 %defattr(-,root,root,-)
 %{_initrddir}/%{name}
+%config(noreplace) %{_sysconfdir}/sysconfig/*

@@ -77,7 +77,7 @@ char *pathcat(const char *a, const char *b)
 
 int isnumber(const char *t)
 {
-	int i;
+	size_t i;
 
 	for (i=0; i<strlen(t); i++)
 		if (!isdigit(t[i])) 

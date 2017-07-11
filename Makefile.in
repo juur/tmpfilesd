@@ -76,11 +76,11 @@ clean: mostlyclean
 
 distclean: clean
 	$(RM) config.log
-	$(RM) $(objdir)/config.h $(objdir)/Makefile
+	$(RM) $(objdir)/config.h{,~} $(objdir)/Makefile
 	$(RM) -r $(objdir)/.d
 
 maintainer-clean: distclean
-	$(RM) $(PACKAGE)-$(VERSION).tar.xz $(objdir)/config.h~
+	$(RM) $(PACKAGE)-$(VERSION).tar.xz
 
 
 .PHONY: dist

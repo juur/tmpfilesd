@@ -93,7 +93,7 @@ if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
 
 # Default compiler flags
 
-CFLAGS=${CFLAGS:--O2}
+CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra}
 CPPFLAGS=${CPPFLAGS:-}
 LDFLAGS=${LDFLAGS:-}
 TARGET=${TARGET:-}

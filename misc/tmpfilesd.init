@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# tmpfilesd    tmpfilesd init script
+#
+# chkconfig:   2345 10 90
+# description: Create Device nodes in /dev on boot and cleanup temporary \
+#              directories on shutdown
+#
+### BEGIN INIT INFO
+# Provides: tmpfilesd
+# Required-Start:
+# Required-Stop:
+# Should-Start:
+# Should-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Description: tmpfilesd init script
+### END INIT INFO
+
+. /etc/rc.d/init.d/functions
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+prog="tmpfilesd"
+exec="/sbin/${prog}"
+config="/etc/sysconfig/tmpfilesd"
+lockfile="/var/lock/subsys/${prog}"
+START_OPTIONS="--prefix=/dev --create --boot"
+STOP_OPTIONS="--create --remove --boot --exclude-prefix=/dev"
+
+[[ -e "${config}" ]] && source "${config}"
+
+start()
+{
+	[[ -x "${exec}" ]] || exit 5
+	echo -n $"Starting ${prog}: "
+	daemon "${exec} ${START_OPTIONS} >/dev/null"
+	retval=$?
+	echo
+	[[ ${retval} -eq 0 ]] && touch ${lockfile}
+	return ${retval}
+}
+
+stop()
+{
+	[[ -x "${exec}" ]] || exit 5
+	echo -n $"Stopping ${prog}: "
+	daemon "${exec} ${STOP_OPTIONS} >/dev/null"
+	retval=$?
+	echo
+	[[ ${retval} -eq 0 ]] && rm -f ${lockfile}
+	return ${retval}
+}
+
+restart()
+{
+	stop
+	start
+}
+
+case "${1:-}" in
+	start)		start ;;
+	stop)		stop ;;
+	restart)	restart ;;
+	*)			echo $"Usage: ${0} {start|stop|restart}"; exit 2 ;;
+esac
+
+exit $?

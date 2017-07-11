@@ -1,0 +1,4 @@
+# execute tmpfilesd cleanup after boot and then daily
+
+@boot	/sbin/tmpfilesd --clean
+@daily	/sbin/tmpfilesd --clean

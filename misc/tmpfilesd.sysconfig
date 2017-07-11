@@ -1,0 +1,5 @@
+# Default options for boot up
+#START_OPTIONS="--prefix=/dev --create --boot"
+
+# Default options for shutdown
+#STOP_OPTIONS="--create --remove --boot --exclude-prefix=/dev"
