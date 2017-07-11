@@ -4,8 +4,8 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-
-show_help() {
+show_help() 
+{
 	cat <<EOF
 	Usage: configure [options]
 Configuration:
@@ -63,7 +63,7 @@ while :; do
 		--program-prefix=) PROGPREFIX= ;;
 		--disable-dependency-tracking) DEPS=0 ;;
 		--enable-dependency-tracking) DEPS=1 ;;
-		*) [ -n "${1-}" ] && echo "Unknown argument ${1}" >&2 ;;
+		*) [[ -n "${1-}" ]] && { echo "Unknown argument ${1}" >&2; exit 1; } ;;
 	esac
 	shift || break
 done
@@ -102,9 +102,8 @@ SHAREDSTATEDIR=${SHAREDSTATEDIR:-\$(prefix)/var/lib}
 SYSCONFDIR=${SYSCONFDIR:-\$(prefix)/etc}
 TARGET=${TARGET:-}
 
-if [ "${PREFIX}" = "/" ]; then PREFIX=""; fi
-
-[ -n "${TARGET}" ] && TOOL="${TARGET}-" || TOOL=""
+[[ "${PREFIX}" = "/" ]] &&  PREFIX=""
+[[ -n "${TARGET}" ]] && TOOL="${TARGET}-" || TOOL=""
 
 # Default compiler flags
 
@@ -127,7 +126,7 @@ VERSION=$(cat ${SRCDIR}/misc/VERSION)
 # Check for a c compiler (mandatory)
 
 echo -n "Checking for a C compiler ... "
-if [ ! -x "$(which ${CC})" ]; then
+if [[ ! -x "$(which ${CC})" ]]; then
 	fail "Error: CC not valid"
 else
 	export CC
@@ -140,11 +139,8 @@ echo -e '#include <stdlib.h>\nmain() {exit(0);}' | \
 
 HOST_MACHINE=$(${CC} -dumpmachine)
 
-if [ -n "${TARGET}" ]; then
-	echo "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE} for target ${TARGET}"
-else
-	echo "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE}"
-fi
+echo -n "Configuring ${PACKAGE} ${VERSION} on ${HOST_MACHINE}"
+[[ -n "${TARGET}" ]] &&	echo " for target ${TARGET}" || echo ""
 
 echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
@@ -169,7 +165,7 @@ LIB_CHECK=""
 # Check for pkg-config (mandatory)
 
 echo -n "Checking for pkg-config ... "
-if [ ! -x "$(which ${PKG_CONFIG})" ]; then
+if [[ ! -x "$(which ${PKG_CONFIG})" ]]; then
 	fail "Error: PKG_CONFIG not valid"
 fi
 
@@ -220,7 +216,7 @@ check_lib()
 
 ok()
 {
-	if [ $1 -eq 0 ]; then echo "ok"; else echo "not found"; fi
+	[[ $1 -eq 0 ]] && echo "ok" ||  echo "not found"
 }
 
 check_func()
@@ -244,7 +240,7 @@ check_func()
 }
 
 # start a new configuration file
-if [ -e ${OBJDIR}/config.h ]; then 
+if [[ -e ${OBJDIR}/config.h ]]; then 
 	mv -f ${OBJDIR}/config.h ${OBJDIR}/config.h~; 
 fi
 rm -f ${OBJDIR}/config.h
