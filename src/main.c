@@ -62,6 +62,14 @@ static char *machineid = NULL;
 static char *kernelrel = NULL;
 static char *bootid = NULL;
 
+typedef struct ignent {
+	char path[PATH_MAX];
+	bool contents;
+} ignent_t;
+
+static ignent_t *ignores = NULL;
+int ignores_size = 0;
+
 static void show_version()
 {
 	printf("tmpfilesd %s\n", VERSION);
@@ -71,20 +79,20 @@ static void show_version()
 static void show_help()
 {
 	printf(
-"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
-"Manage tmpfiles entries\n\n"
-"  -h, --help                 show help\n"
-"      --version              show version number\n"
-"      --create               create or write to files\n"
-"      --clean                clean up files or folders\n"
-"      --remove               remove directories or filse\n"
-"      --boot                 also execute lines with a !\n"
-"      --prefix=PATH          only apply rules with a matching path\n"
-"      --exclude-prefix=PATH  ignores rules with paths that match\n"
-"      --root=ROOT            all paths including config will be prefixed\n"
-"\n"
-);
-	
+			"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
+			"Manage tmpfiles entries\n\n"
+			"  -h, --help                 show help\n"
+			"      --version              show version number\n"
+			"      --create               create or write to files\n"
+			"      --clean                clean up files or folders\n"
+			"      --remove               remove directories or filse\n"
+			"      --boot                 also execute lines with a !\n"
+			"      --prefix=PATH          only apply rules with a matching path\n"
+			"      --exclude-prefix=PATH  ignores rules with paths that match\n"
+			"      --root=ROOT            all paths including config will be prefixed\n"
+			"\n"
+		  );
+
 	exit(EXIT_SUCCESS);
 }
 
@@ -479,10 +487,10 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 }
 
 /*static int unlinkfolder(const char *path)
-{
-	//printf("rm-rf %s\n", path);
-	errno = ENOSYS;
-	return -1;
+  {
+//printf("rm-rf %s\n", path);
+errno = ENOSYS;
+return -1;
 }*/
 
 static int dummyunlink(const char *path)
@@ -621,6 +629,7 @@ static void process_line(const char *line)
 	char **globs = NULL;
 	size_t nglobs = 0;
 	glob_t *fileglob = NULL;
+	int fd = -1;
 
 	uid_t uid = 0; int defuid = 0;
 	gid_t gid = 0; int defgid = 0;
@@ -633,11 +642,19 @@ static void process_line(const char *line)
 			"%ms %ms %ms %ms %ms %ms %m[^\n]s",
 			&rawtype, &tmppath, &modet, &uidt, &gidt, &aget, &arg);
 
+	if ( prefix && strncmp(prefix, tmppath, strlen(prefix)) )
+		goto cleanup;
+
+	if ( exclude && !strncmp(exclude, tmppath, strlen(exclude)) )
+		goto cleanup;
+
 	if ( fields < 2 ) {
 		warnx("bad line: %s\n", line);
+		goto cleanup;
 		return;
 	} else if ( validate_type(rawtype, &type, &suff, &boot_only) ) {
 		warnx("bad type: %s\n", line);
+		goto cleanup;
 		return;
 	} else {
 		switch(type)
@@ -665,6 +682,7 @@ static void process_line(const char *line)
 			case 'A':	act = ACLR;			break;
 			default:
 						warnx("unknown type: %s\n", line);
+						goto cleanup;
 						return;
 		}
 	}
@@ -679,7 +697,7 @@ static void process_line(const char *line)
 	if (aget) age = vet_age((const char **)&aget, &subonly);
 	if (path) path = vet_path(path);
 
-	int i, fd = -1;
+	int i;
 
 	if ( (do_boot && boot_only) || !boot_only ) {
 		switch(act)
@@ -707,18 +725,17 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* r - Remove a file or directory if it exists (empty only)
-			 * R - Recursively remove a path and all its subdirectories
-			 *
-			 * Mode: ignored
-			 * UID, GID: ignored
-			 * Age: ignored
-			 */
+				/* r - Remove a file or directory if it exists (empty only)
+				 * R - Recursively remove a path and all its subdirectories
+				 *
+				 * Mode: ignored
+				 * UID, GID: ignored
+				 * Age: ignored
+				 */
 			case RM:
 			case RMRF:
 				if (!do_remove) break;
 				glob_file(path, &globs, &nglobs, &fileglob);
-				printf("nglobs=%ld\n", nglobs);
 				for (i=0;i<(int)nglobs;i++)
 				{
 					if (act&0x1) {
@@ -729,29 +746,39 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* x - Ignore a path during cleaning (plus contents)
-			 * X - Ignore a path during cleaning (ignores contents)
-			 *
-			 * Mode: ignored
-			 * UID, GID: ignored
-			 */
+				/* x - Ignore a path during cleaning (plus contents)
+				 * X - Ignore a path during cleaning (ignores contents)
+				 *
+				 * Mode: ignored
+				 * UID, GID: ignored
+				 */
 			case IGN:
 			case IGNR:
 				glob_file(path, &globs, &nglobs, &fileglob);
 				for (i=0; i<(int)nglobs; i++)
 				{
+					ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
+					if (!ignores) {
+						warn("realloc");
+						break;
+					}
+
+					strncpy(ignores[ignores_size].path, globs[i], PATH_MAX);
+					ignores[ignores_size].contents = (act == IGN) ? true : false;
+					ignores_size++;
+
 					printf("[%u] ignore/r %s\n", 
 							i, globs[i]);
 				}
 				break;
 
-			/* z - Adjust the access mode, group and user, and restore the 
-			 *     SELinux security context (if it exists)
-			 * Z - As above, recursively.
-			 *
-			 * Mode: NULL/- means do not change
-			 * UID, GID: NULL/- means do not change
-			 */
+				/* z - Adjust the access mode, group and user, and restore the 
+				 *     SELinux security context (if it exists)
+				 * Z - As above, recursively.
+				 *
+				 * Mode: NULL/- means do not change
+				 * UID, GID: NULL/- means do not change
+				 */
 			case CHMOD:
 			case CHMODR:
 				glob_file(path, &globs, &nglobs, &fileglob);
@@ -777,7 +804,7 @@ static void process_line(const char *line)
 							warn("chmod(%s,%s)", globs[i], modet);
 						} else {
 							warnx("chmod(%s,%u)", globs[i], mmode);
-													
+
 							if (chmod(globs[i], mmode))
 								warn("chmod(%s,%s)", globs[i], modet);
 						}
@@ -788,13 +815,13 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* t - Set extended attributes
-			 * T - Set extended attributes, recursively
-			 *
-			 * Mode: ignored
-			 * UID, GID: ignored
-			 * Age: ignored
-			 */
+				/* t - Set extended attributes
+				 * T - Set extended attributes, recursively
+				 *
+				 * Mode: ignored
+				 * UID, GID: ignored
+				 * Age: ignored
+				 */
 			case CHATTR:
 			case CHATTRR:
 				glob_file(path, &globs, &nglobs, &fileglob);
@@ -807,14 +834,14 @@ static void process_line(const char *line)
 				//printf("chattr/chattrr\n\n");
 				break;
 
-			/* a/a+ - Set POSIX ACLs. If suffixed with +, specified entries 
-			 *        will be added to the existing set
-			 * A/A+ - as above, but recursive.
-			 *
-			 * Mode: ignored
-			 * UID, GID: ignored
-			 * Age: ignored
-			 */
+				/* a/a+ - Set POSIX ACLs. If suffixed with +, specified entries 
+				 *        will be added to the existing set
+				 * A/A+ - as above, but recursive.
+				 *
+				 * Mode: ignored
+				 * UID, GID: ignored
+				 * Age: ignored
+				 */
 			case ACL:
 			case ACLR:
 				glob_file(path, &globs, &nglobs, &fileglob);
@@ -826,18 +853,18 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* v - create subvolume, or behave as d if not supported 
-			 */
+				/* v - create subvolume, or behave as d if not supported 
+				*/
 			case CREATE_SVOL:
-				errno = ENOSYS;
-				warn("subvol(%s)", path);
+				//				errno = ENOSYS;
+				//				warn("subvol(%s)", path);
 
-			/* d - create a directory (if does not exist)
-			 * D - create a direcotry (delete contents if exists)
-			 */
+				/* d - create a directory (if does not exist)
+				 * D - create a direcotry (delete contents if exists)
+				 */
 			case MKDIR:
 			case MKDIR_RMF:
-				if (do_clean && age) {
+				if ( (do_clean && age) || (do_remove && act == MKDIR_RMF) ) {
 					//printf("mkdir do_clean age=%lu\n", age->tv_sec);
 					if (subonly) {
 						DIR *dirp = opendir(path);
@@ -853,46 +880,54 @@ static void process_line(const char *line)
 
 							if ( (buf = pathcat(path, dirent->d_name)) )
 							{
-								rmifold(buf, age);
+								if (do_clean && age)
+									rmifold(buf, age);
+								else
+									dummyunlink(buf);
 								free(buf);
 							}
 
 						}
 
 					} else {
-						rmifold(path, age);
+						if (do_clean && age)
+							rmifold(path, age);
+						else
+							dummyunlink(path);
 					}
 				}
 
 				if (do_create) {
-					printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, 
-							aget);
-					printf("MKDIR %s [%d] %u %u %u\n", path, defmode, 
-							(defmode ? DEF_FOLD : mode), uid, gid);
+					/*
+					   printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, 
+					   aget);
+					   printf("MKDIR %s [%d] %u %u %u\n", path, defmode, 
+					   (defmode ? DEF_FOLD : mode), uid, gid);
+					   */
 					fd = open(path, O_DIRECTORY|O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
 					else if (fd != -1 && !(act&0x1)) break;
 					else if (fd != -1 && rmrf(path))
 						warn("rmrf(%s)", path);
-					
+
 					if (fd != -1)
 						close(fd);
 
-					fd = mkdir(path, (defmode ? DEF_FOLD : mode));
+					fd = mkpath(path, (defmode ? DEF_FOLD : mode));
 					if (fd == -1)
-						warn("mkdir(%s)", path);
+						warn("mkpathr(%s)", path);
 					else if (fchown(fd, uid, gid))
 						warn("fchown(%s)", path);
 				}
 
 				break;
-				
-			/* f - Create a file if it does not exist
-			 * F - Create a file, truncate if exists
-			 *
-			 * Age: ignored
-			 * Argument: written to the file, suffixed by \n
-			 */
+
+				/* f - Create a file if it does not exist
+				 * F - Create a file, truncate if exists
+				 *
+				 * Age: ignored
+				 * Argument: written to the file, suffixed by \n
+				 */
 			case CREAT_FILE:
 			case TRUNC_FILE:
 				if (do_create) {
@@ -906,12 +941,12 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* C - Recursively copy a file or directory, if the destination 
-			 *     files or directories do not exist yet
-			 *
-			 * Argument: specifics the source folder/file. 
-			 *           If blank uses /usr/share/factory/$NAME
-			 */
+				/* C - Recursively copy a file or directory, if the destination 
+				 *     files or directories do not exist yet
+				 *
+				 * Argument: specifics the source folder/file. 
+				 *           If blank uses /usr/share/factory/$NAME
+				 */
 			case COPY:
 				if (do_create) {
 					dest = pathcat(root, arg);
@@ -919,11 +954,11 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* p - Create a pipe (FIFO) if it does not exist
-			 * p+ - Remove and create a pipe (FIFO)
-			 *
-			 * Argument: ignored
-			 */
+				/* p - Create a pipe (FIFO) if it does not exist
+				 * p+ - Remove and create a pipe (FIFO)
+				 *
+				 * Argument: ignored
+				 */
 			case CREATE_PIPE:
 				if (do_create) {
 					fd = open(path, O_RDONLY);
@@ -941,13 +976,13 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* L - Create a symlink if it does not exist
-			 * L+ - Unlink and then create
-			 *
-			 * Mode: ignored
-			 * UID/GID: ignored
-			 * Argument: if empty, symlink to /usr/share/factory/$NAME
-			 */
+				/* L - Create a symlink if it does not exist
+				 * L+ - Unlink and then create
+				 *
+				 * Mode: ignored
+				 * UID/GID: ignored
+				 * Argument: if empty, symlink to /usr/share/factory/$NAME
+				 */
 			case CREATE_SYM: // FIXME handle NULL dest => /usr/share/factory
 				if (do_create) {
 					if (strncmp("../", arg, 3) )
@@ -976,11 +1011,11 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* c - Create a pipe (FIFO) if it does not exist
-			 * c+ - Remove and create a pipe (FIFO)
-			 *
-			 * Argument: ignored
-			 */
+				/* c - Create a pipe (FIFO) if it does not exist
+				 * c+ - Remove and create a pipe (FIFO)
+				 *
+				 * Argument: ignored
+				 */
 			case CREATE_CHAR:
 				if (do_create) {
 					fd = open(path, O_RDONLY);
@@ -999,11 +1034,11 @@ static void process_line(const char *line)
 				}
 				break;
 
-			/* b - Create a pipe (FIFO) if it does not exist
-			 * b+ - Remove and create a pipe (FIFO)
-			 *
-			 * Argument: ignored
-			 */
+				/* b - Create a pipe (FIFO) if it does not exist
+				 * b+ - Remove and create a pipe (FIFO)
+				 *
+				 * Argument: ignored
+				 */
 			case CREATE_BLK:
 				if (do_create) {
 					dest = pathcat(root, arg);
@@ -1013,6 +1048,8 @@ static void process_line(const char *line)
 				break;
 		}
 	}
+
+cleanup:
 
 	if (fd != -1) 
 		close(fd);
@@ -1061,6 +1098,12 @@ static void process_file(const char *file, const char *folder)
 	}
 
 	//printf("processing %s\n", in);
+
+	if (ignores) {
+		ignores_size = 0;
+		free(ignores);
+		ignores = NULL;
+	}
 
 	FILE *fp;
 
@@ -1190,8 +1233,9 @@ int main(int argc, char * const argv[])
 	if (!root)
 		root = "";
 
-	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,do_remove=%d,do_boot=%d\nroot=%s\n",
-			do_clean, do_clean, do_remove, do_boot,
+	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
+			"do_remove=%d,do_boot=%d\nroot=%s\n",
+			do_create, do_clean, do_remove, do_boot,
 			root);
 
 	process_folder(pathcat(root, "/etc/tmpfiles.d"));
