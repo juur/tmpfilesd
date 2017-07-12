@@ -79,19 +79,19 @@ static void show_version()
 static void show_help()
 {
 	printf(
-			"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
-			"Manage tmpfiles entries\n\n"
-			"  -h, --help                 show help\n"
-			"      --version              show version number\n"
-			"      --create               create or write to files\n"
-			"      --clean                clean up files or folders\n"
-			"      --remove               remove directories or filse\n"
-			"      --boot                 also execute lines with a !\n"
-			"      --prefix=PATH          only apply rules with a matching path\n"
-			"      --exclude-prefix=PATH  ignores rules with paths that match\n"
-			"      --root=ROOT            all paths including config will be prefixed\n"
-			"\n"
-		  );
+	"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
+	"Manage tmpfiles entries\n\n"
+	"  -h, --help                 show help\n"
+	"      --version              show version number\n"
+	"      --create               create or write to files\n"
+	"      --clean                clean up files or folders\n"
+	"      --remove               remove directories or filse\n"
+	"      --boot                 also execute lines with a !\n"
+	"      --prefix=PATH          only apply rules with a matching path\n"
+	"      --exclude-prefix=PATH  ignores rules with paths that match\n"
+	"      --root=ROOT            all paths including config will be prefixed\n"
+	"\n"
+	);
 
 	exit(EXIT_SUCCESS);
 }
