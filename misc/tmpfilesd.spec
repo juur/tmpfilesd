@@ -46,10 +46,10 @@ mkdir -p %{buildroot}%{_sysconfdir}/cron.d
 install -T -m 644 misc/%{name}.cron %{buildroot}%{_sysconfdir}/cron.d/%{name}
 
 %post sysvinit
-[[ ${1} == 0 ]] && chkconfig --add %{name}
+[[ "${1}" -eq 0 ]] && chkconfig --add tmpfilesd
 
 %preun sysvinit
-[[ ${1} == 0 ]] && chkconfig --delete %{name}
+[[ "${1}" -eq 0 ]] && chkconfig --delete tmpfilesd
 
 %files
 %defattr(-,root,root,-)

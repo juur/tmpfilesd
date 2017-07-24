@@ -1138,7 +1138,7 @@ static void process_folder(const char *folder)
 
 	//printf("checking folder: %s\n", folder);
 	if ( !(dirp = opendir(folder)) ) {
-		warn("opendir");
+		warn("opendir(%s)", folder);
 		return;
 	}
 
