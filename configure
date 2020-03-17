@@ -289,7 +289,7 @@ echo "Writing Makefile"
 ARGS=$(cat <<- __END
 	s#@@DEPS@@#${DEPS}#;
 	s#@@BINDIR@@#${BINDIR}#;
-	s##@@DOCDIR##${DOCDOR}#;
+	s##@@DOCDIR##${DOCDIR}#;
 	s#@@CC@@#${CC}#;
 	s#@@CFLAGS@@#${CFLAGS}#;
 	s#@@CXX@@#${CXX}#;
