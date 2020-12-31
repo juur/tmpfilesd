@@ -84,25 +84,29 @@ fi
 
 # Default file locations, or use env provided ones
 
-BINDIR=${BINDIR:-\$(exec_prefix)/bin}
-DATADIR=${DATADIR:-\$(datarootdir)}
-DATAROOTDIR=${DATAROOTDIR:-\$(prefix)/share}
-DOCDIR=${DOCDIR:-\$(datarootdir)/doc}
-EXECPREFIX=${EXECPREFIX:-\$(prefix)}
-INCLUDEDIR=${INCLUDEDIR:-\$(prefix)/include}
-INFODIR=${INFODIR:-\$(datarootdir)/info}
-LIBDIR=${LIBDIR:-\$(prefix)/lib}
-LIBEXECDIR=${LIBEXECDIR:-\$(exec_prefix)/libexec}
-LOCALEDIR=${LOCALEDIR:-\$(datarootdir)/locale}
-LOCALSTATEDIR=${LOCALSTATEDIR:-\$(prefix)/var}
-MANDIR=${MANDIR:-\$(datarootdir)/man}
 PREFIX=${PREFIX:-/usr/local}
-SBINDIR=${SBINDIR:-\$(exec_prefix)/sbin}
-SHAREDSTATEDIR=${SHAREDSTATEDIR:-\$(prefix)/var/lib}
-SYSCONFDIR=${SYSCONFDIR:-\$(prefix)/etc}
-TARGET=${TARGET:-}
-
 [[ "${PREFIX}" = "/" ]] &&  PREFIX=""
+EXECPREFIX=${EXECPREFIX:-${PREFIX}}
+DATAROOTDIR=${DATAROOTDIR:-${PREFIX}/share}
+BINDIR=${BINDIR:-${EXECPREFIX}/bin}
+DATADIR=${DATADIR:-${DATAROOTDIR}}
+DOCDIR=${DOCDIR:-${DATAROOTDIR}/doc}
+INCLUDEDIR=${INCLUDEDIR:-${PREFIX}/include}
+INFODIR=${INFODIR:-${DATAROOTDIR}/info}
+LIBDIR=${LIBDIR:-${PREFIX}/lib}
+LIBEXECDIR=${LIBEXECDIR:-${EXECPREFIX}/libexec}
+LOCALEDIR=${LOCALEDIR:-${DATAROOTDIR}/locale}
+LOCALSTATEDIR=${LOCALSTATEDIR:-${PREFIX}/var}
+MANDIR=${MANDIR:-${DATAROOTDIR}/man}
+SBINDIR=${SBINDIR:-${EXECPREFIX}/sbin}
+SHAREDSTATEDIR=${SHAREDSTATEDIR:-${PREFIX}/var/lib}
+SYSCONFDIR=${SYSCONFDIR:-${PREFIX}/etc}
+TARGET=${TARGET:-}
+YACC=${YACC:-yacc}
+LEX=${LEX:-lex}
+LFLAGS=${LFLAGS:-}
+YFLAGS=${LFLAGS:-}
+
 [[ -n "${TARGET}" ]] && TOOL="${TARGET}-" || TOOL=""
 
 # Default compiler flags
@@ -282,6 +286,8 @@ for f in ${FUNC_CHECK}; do
 	fi
 done
 
+# Append any *DIR variables to config.h here
+
 # Create Makefile from template
 
 echo "Writing Makefile"
@@ -289,10 +295,13 @@ echo "Writing Makefile"
 ARGS=$(cat <<- __END
 	s#@@DEPS@@#${DEPS}#;
 	s#@@BINDIR@@#${BINDIR}#;
-	s##@@DOCDIR##${DOCDIR}#;
+	s#@@DOCDIR@@#${DOCDIR}#;
 	s#@@CC@@#${CC}#;
 	s#@@CFLAGS@@#${CFLAGS}#;
+	s#@@CPPFLAGS@@#${CPPFLAGS}#;
 	s#@@CXX@@#${CXX}#;
+	s#@@LFLAGS@@#${LFLAGS}#;
+	s#@@YFLAGS@@#${YFLAGS}#;
 	s#@@DATADIR@@#${DATADIR}#;
 	s#@@DATAROOTDIR@@#${DATAROOTDIR}#;
 	s#@@EXECPREFIX@@#${EXECPREFIX}#;
@@ -309,6 +318,8 @@ ARGS=$(cat <<- __END
 	s#@@SHAREDSTATEDIR@@#${SHAREDSTATEDIR}#;
 	s#@@SRCDIR@@#${SRCDIR}#;
 	s#@@SYSCONFDIR@@#${SYSCONFDIR}#;
+	s#@@YACC@@#${YACC}#;
+	s#@@LEX@@#${LEX}#;
 __END
 )
 

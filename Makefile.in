@@ -9,11 +9,15 @@ objdir := @@OBJDIR@@
 DESTDIR         := 
 CC              := @@CC@@
 CXX             := @@CXX@@
-CFLAGS          := @@CFLAGS@@ -std=gnu99
-CPPFLAGS        := 
+LEX             := @@LEX@@
+YACC		    := @@YACC@@
+YFLAGS          := @@YFLAGS@@ -d -t
+CFLAGS          := @@CFLAGS@@ -std=c99
+CPPFLAGS        := @@CPPFLAGS@@
 LDFLAGS         := -L$(srcdir)/src -L$(objdir) -L. @@LDFLAGS@@
 CAT             := cat
 TAR             := tar
+RM              ?= rm -f
 PKGCONFIG       := pkg-config
 VERSION         := $(shell $(CAT) "$(srcdir)/misc/VERSION")
 PACKAGE         := $(shell $(CAT) "$(srcdir)/misc/PACKAGE")
@@ -35,6 +39,7 @@ infodir     := @@INFODIR@@
 libdir      := @@LIBDIR@@
 mandir		:= @@MANDIR@@
 localedir	:= @@LOCALEDIR@@
+sysconfdir  := @@SYSCONFDIR@@
 
 all_SRCS     := $(wildcard $(srcdir)/src/*.c)
 all_HEADERS  := $(wildcard $(srcdir)/src/*.h)
