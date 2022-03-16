@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+#define _XOPEN_SOURCE 700
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -59,7 +59,7 @@ char *pathcat(const char *a, const char *b)
 {
 	if ( !a || !b ) return NULL;
 
-	int len = strlen(a) + strlen(b) + 2;
+	size_t len = strlen(a) + strlen(b) + 2;
 	char *ret = malloc(len);
 
 	if ( !ret ) {

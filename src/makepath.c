@@ -15,7 +15,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define _GNU_SOURCE
+#define _XOPEN_SOURCE 700
+#include <unistd.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <libgen.h>
 #include <sys/stat.h>
@@ -44,7 +46,8 @@ int mkpath(char *dir, mode_t mode)
 	if (!stat(dir, &sb))
 		return 0;
 
-	mkpath(dirname(strdupa(dir)), mode);
+	/* TODO: fix the memory leak on strdup */
+	mkpath(dirname(strdup(dir)), mode);
 
 	return mkdir(dir, mode);
 }

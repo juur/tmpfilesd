@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+#define _XOPEN_SOURCE 700
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <stdbool.h>
+#include <limits.h>
 
 #include "config.h"
 #include "util.h"

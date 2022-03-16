@@ -105,13 +105,13 @@ TARGET=${TARGET:-}
 YACC=${YACC:-yacc}
 LEX=${LEX:-lex}
 LFLAGS=${LFLAGS:-}
-YFLAGS=${LFLAGS:-}
+YFLAGS=${YFLAGS:-}
 
 [[ -n "${TARGET}" ]] && TOOL="${TARGET}-" || TOOL=""
 
 # Default compiler flags
 
-CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra}
+CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra -pedantic}
 CPPFLAGS=${CPPFLAGS:-}
 LDFLAGS=${LDFLAGS:-}
 TARGET=${TARGET:-}
@@ -150,7 +150,7 @@ echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
 # List of system headers we need to check for
 
-H_FILES="stdlib.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h"
+H_FILES="stdlib.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h limits.h"
 
 # List of system functions to check for function:arg0,arg1
 

@@ -11,6 +11,7 @@ CC              := @@CC@@
 CXX             := @@CXX@@
 LEX             := @@LEX@@
 YACC		    := @@YACC@@
+LFLAGS          := @@LFLAGS@@
 YFLAGS          := @@YFLAGS@@ -d -t
 CFLAGS          := @@CFLAGS@@ -std=c99
 CPPFLAGS        := @@CPPFLAGS@@
