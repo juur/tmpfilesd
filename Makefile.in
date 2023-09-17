@@ -17,14 +17,13 @@ CFLAGS          := @@CFLAGS@@ -std=c99
 CPPFLAGS        := @@CPPFLAGS@@
 LDFLAGS         := -L$(srcdir)/src -L$(objdir) -L. @@LDFLAGS@@
 CAT             := cat
+CP              := cp
 TAR             := tar
 RM              ?= rm -f
+MKDIR           := mkdir -p
 PKGCONFIG       := pkg-config
 VERSION         := $(shell $(CAT) "$(srcdir)/misc/VERSION")
 PACKAGE         := $(shell $(CAT) "$(srcdir)/misc/PACKAGE")
-INSTALL         := install -c
-INSTALL_PROGRAM := $(INSTALL)
-INSTALL_DATA    := $(INSTALL) -m 644
 HELP2MAN		:= help2man
 DEPS			:= @@DEPS@@
 
@@ -68,9 +67,12 @@ $(objdir)/$(PACKAGE): $(package_OBJS)
 .PHONY: install uninstall
 
 install: $(PACKAGE)
-	$(INSTALL_PROGRAM) $(objdir)/$(PACKAGE) $(DESTDIR)$(bindir)
-	$(INSTALL_DATA) $(srcdir)/misc/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
-	$(INSTALL_DATA) $(objdir)/$(PACKAGE).8 $(DESTDIR)$(mandir)/man8/
+	$(MKDIR) $(DESTDIR)$(bindir)
+	$(MKDIR) $(DESTDIR)$(prefix)/lib/tmpfiles.d
+	$(MKDIR) $(DESTDIR)$(mandir)/man8
+	$(CP) $(objdir)/$(PACKAGE) $(DESTDIR)$(bindir)/
+	$(CP) $(srcdir)/misc/tmpfiles-d/*.conf $(DESTDIR)$(prefix)/lib/tmpfiles.d/
+	$(CP) $(objdir)/$(PACKAGE).8 $(DESTDIR)$(mandir)/man8/
 
 uninstall:
 	$(RM) $(DESTDIR)$(bindir)/$(PACKAGE)
