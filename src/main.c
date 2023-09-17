@@ -1,6 +1,7 @@
 #define _XOPEN_SOURCE 700
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <getopt.h>
@@ -399,7 +400,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	if (!t || !*t || **t == '-')
 		return NULL;
 
-	u_int64_t val;
+	uint64_t val;
 	int read, ret;
 	char *tmp = NULL; 
 	const char *src = *t;
@@ -419,19 +420,19 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	}
 
 	if ( !tmp || !*tmp )
-		val = (u_int64_t)ret * 1000000;
+		val = (uint64_t)ret * 1000000;
 	else if ( !strcmp(tmp, "ms") )
-		val = (u_int64_t)ret * 1000;
+		val = (uint64_t)ret * 1000;
 	else if ( !strcmp(tmp, "s") )
-		val = (u_int64_t)ret * 1000000;
+		val = (uint64_t)ret * 1000000;
 	else if ( !strcmp(tmp, "m") || !strcmp(tmp, "min") )
-		val = (u_int64_t)ret * 1000000 * 60;
+		val = (uint64_t)ret * 1000000 * 60;
 	else if ( !strcmp(tmp, "h") )
-		val = (u_int64_t)ret * 1000000 * 60 * 60;
+		val = (uint64_t)ret * 1000000 * 60 * 60;
 	else if ( !strcmp(tmp, "d") ) {
-		val = (u_int64_t)ret * 1000000 * 60 * 60 * 24;
+		val = (uint64_t)ret * 1000000 * 60 * 60 * 24;
 	} else if ( !strcmp(tmp, "w") )
-		val = (u_int64_t)ret * 1000000 * 60 * 60 * 24 * 7;
+		val = (uint64_t)ret * 1000000 * 60 * 60 * 24 * 7;
 	else {
 		if (tmp) free(tmp);
 		warnx("invalid age: %s\n", *t);
