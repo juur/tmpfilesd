@@ -327,4 +327,4 @@ cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > ${OBJDIR}/Makefile
 
 echo "Please type make to continue"
 
-wait
+exit 0
