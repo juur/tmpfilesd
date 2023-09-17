@@ -72,13 +72,13 @@ typedef struct ignent {
 static ignent_t *ignores = NULL;
 int ignores_size = 0;
 
-static void show_version()
+static void show_version(void)
 {
 	printf("tmpfilesd %s\n", VERSION);
 	exit(EXIT_SUCCESS);
 }
 
-static void show_help()
+static void show_help(void)
 {
 	printf(
 	"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
@@ -183,7 +183,7 @@ static gid_t vet_gid(const char **t, int *defgid)
 }
 
 
-static const char *getbootid()
+static const char *getbootid(void)
 {
 	if (bootid)
 		return bootid;
@@ -209,7 +209,7 @@ static const char *getbootid()
 }
 
 
-static const char *getkernelrelease()
+static const char *getkernelrelease(void)
 {
 	if (kernelrel)
 		return kernelrel;
@@ -231,7 +231,7 @@ static const char *getkernelrelease()
 	return kernelrel;
 }
 
-static const char *gethost()
+static const char *gethost(void)
 {
 	if (hostname)
 		return hostname;
@@ -246,7 +246,7 @@ static const char *gethost()
 	return hostname;
 }
 
-static const char *getmachineid()
+static const char *getmachineid(void)
 {
 	if (machineid)
 		return machineid;
