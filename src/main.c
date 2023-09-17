@@ -1,6 +1,7 @@
 #define _XOPEN_SOURCE 700
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <getopt.h>
@@ -71,13 +72,13 @@ typedef struct ignent {
 static ignent_t *ignores = NULL;
 int ignores_size = 0;
 
-static void show_version()
+static void show_version(void)
 {
 	printf("tmpfilesd %s\n", VERSION);
 	exit(EXIT_SUCCESS);
 }
 
-static void show_help()
+static void show_help(void)
 {
 	printf(
 	"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
@@ -182,7 +183,7 @@ static gid_t vet_gid(const char **t, int *defgid)
 }
 
 
-static const char *getbootid()
+static const char *getbootid(void)
 {
 	if (bootid)
 		return bootid;
@@ -208,7 +209,7 @@ static const char *getbootid()
 }
 
 
-static const char *getkernelrelease()
+static const char *getkernelrelease(void)
 {
 	if (kernelrel)
 		return kernelrel;
@@ -230,7 +231,7 @@ static const char *getkernelrelease()
 	return kernelrel;
 }
 
-static const char *gethost()
+static const char *gethost(void)
 {
 	if (hostname)
 		return hostname;
@@ -245,7 +246,7 @@ static const char *gethost()
 	return hostname;
 }
 
-static const char *getmachineid()
+static const char *getmachineid(void)
 {
 	if (machineid)
 		return machineid;
@@ -399,7 +400,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	if (!t || !*t || **t == '-')
 		return NULL;
 
-	u_int64_t val;
+	uint64_t val;
 	int read, ret;
 	char *tmp = NULL; 
 	const char *src = *t;
@@ -419,19 +420,19 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	}
 
 	if ( !tmp || !*tmp )
-		val = (u_int64_t)ret * 1000000;
+		val = (uint64_t)ret * 1000000;
 	else if ( !strcmp(tmp, "ms") )
-		val = (u_int64_t)ret * 1000;
+		val = (uint64_t)ret * 1000;
 	else if ( !strcmp(tmp, "s") )
-		val = (u_int64_t)ret * 1000000;
+		val = (uint64_t)ret * 1000000;
 	else if ( !strcmp(tmp, "m") || !strcmp(tmp, "min") )
-		val = (u_int64_t)ret * 1000000 * 60;
+		val = (uint64_t)ret * 1000000 * 60;
 	else if ( !strcmp(tmp, "h") )
-		val = (u_int64_t)ret * 1000000 * 60 * 60;
+		val = (uint64_t)ret * 1000000 * 60 * 60;
 	else if ( !strcmp(tmp, "d") ) {
-		val = (u_int64_t)ret * 1000000 * 60 * 60 * 24;
+		val = (uint64_t)ret * 1000000 * 60 * 60 * 24;
 	} else if ( !strcmp(tmp, "w") )
-		val = (u_int64_t)ret * 1000000 * 60 * 60 * 24 * 7;
+		val = (uint64_t)ret * 1000000 * 60 * 60 * 24 * 7;
 	else {
 		if (tmp) free(tmp);
 		warnx("invalid age: %s\n", *t);

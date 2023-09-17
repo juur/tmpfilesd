@@ -1,6 +1,8 @@
 #ifndef _UTIL_H
 #define _UTIL_H
 
+#include <sys/stat.h>
+
 char *trim(char *str);
 int is_dot(const char *path);
 char *pathcat(const char *a, const char *b);
