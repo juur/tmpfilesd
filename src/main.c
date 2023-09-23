@@ -135,7 +135,7 @@ static int validate_type(const char *raw, char *type, char *suff,
 /*
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
-static uid_t vet_uid(const char **t, int *defuid)
+static uid_t vet_uid(const char **t, uid_t *defuid)
 {
 	if (!t || !*t || **t == '-') {
 		*defuid = 1;
@@ -160,7 +160,7 @@ static uid_t vet_uid(const char **t, int *defuid)
 /*
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
-static gid_t vet_gid(const char **t, int *defgid)
+static gid_t vet_gid(const char **t, gid_t *defgid)
 {
 	if (!t || !*t || **t == '-') {
 		*defgid = 1;
@@ -633,8 +633,8 @@ static void process_line(const char *line)
 	glob_t *fileglob = NULL;
 	int fd = -1;
 
-	uid_t uid = 0; int defuid = 0;
-	gid_t gid = 0; int defgid = 0;
+	uid_t uid = 0; uid_t defuid = 0;
+	gid_t gid = 0; gid_t defgid = 0;
 	mode_t mode = 0; int mask = 0;
 	dev_t dev = 0;
 
@@ -765,7 +765,7 @@ static void process_line(const char *line)
 						break;
 					}
 
-					strncpy(ignores[ignores_size].path, globs[i], PATH_MAX);
+					strncpy(ignores[ignores_size].path, globs[i], PATH_MAX - 1);
 					ignores[ignores_size].contents = (act == IGN) ? true : false;
 					ignores_size++;
 
@@ -810,8 +810,9 @@ static void process_line(const char *line)
 							if (chmod(globs[i], mmode))
 								warn("chmod(%s,%s)", globs[i], modet);
 						}
-						if (chown(globs[i], defuid ? -1 : uid, 
-									defgid ? -1 : gid))
+						/* FIXME is the logic around -1 right here ? */
+						if (chown(globs[i], defuid ? (uid_t)-1 : uid, 
+									defgid ? (gid_t)-1 : gid))
 							warn("chown(%s,%s,%s)", globs[i], uidt, gidt);
 					}
 				}

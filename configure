@@ -111,7 +111,7 @@ YFLAGS=${YFLAGS:-}
 
 # Default compiler flags
 
-CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra -pedantic}
+CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra -std=c99}
 CPPFLAGS=${CPPFLAGS:-}
 LDFLAGS=${LDFLAGS:-}
 TARGET=${TARGET:-}
