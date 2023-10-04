@@ -111,7 +111,7 @@ YFLAGS=${YFLAGS:-}
 
 # Default compiler flags
 
-CFLAGS=${CFLAGS:--O2 -pipe -Wall -Wextra -std=c99}
+CFLAGS=${CFLAGS:--O2 -Wall -Wextra}
 CPPFLAGS=${CPPFLAGS:-}
 LDFLAGS=${LDFLAGS:-}
 TARGET=${TARGET:-}
@@ -150,7 +150,7 @@ echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
 # List of system headers we need to check for
 
-H_FILES="stdlib.h stdint.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h limits.h"
+H_FILES="stdlib.h stdint.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h limits.h unistd.h stdlib.h errno.h libgen.h sys/stat.h sys/types.h alloca.h string.h stdlib.h stdio.h string.h err.h unistd.h ctype.h"
 
 # List of system functions to check for function:arg0,arg1
 
@@ -207,7 +207,7 @@ check_lib()
 {
 	local F=/tmp/$$.c
 
-	echo "#define _GNU_SOURCE" >${F}
+	echo "#define _XOPEN_SOURCE 700" >${F}
 	echo 'main(){}' >>${F}
 	echo -n "Checking for -l${1} ... "
 	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} -l${1} ${F} \

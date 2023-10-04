@@ -13,7 +13,7 @@ LEX             := @@LEX@@
 YACC		    := @@YACC@@
 LFLAGS          := @@LFLAGS@@
 YFLAGS          := @@YFLAGS@@ -d -t
-CFLAGS          := @@CFLAGS@@ -std=c99
+CFLAGS          := @@CFLAGS@@ -std=c11
 CPPFLAGS        := @@CPPFLAGS@@
 LDFLAGS         := -L$(srcdir)/src -L$(objdir) -L. @@LDFLAGS@@
 CAT             := cat
