@@ -811,9 +811,9 @@ static void process_line(const char *line)
 								warn("chmod(%s,%s)", globs[i], modet);
 						}
 						/* FIXME is the logic around -1 right here ? */
-						if (chown(globs[i], defuid ? (uid_t)-1 : uid, 
+						if (lchown(globs[i], defuid ? (uid_t)-1 : uid, 
 									defgid ? (gid_t)-1 : gid))
-							warn("chown(%s,%s,%s)", globs[i], uidt, gidt);
+							warn("lchown(%s,%s,%s)", globs[i], uidt, gidt);
 					}
 				}
 				break;
