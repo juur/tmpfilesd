@@ -58,7 +58,7 @@ $(objdir)/.d:
 	@mkdir -p $(objdir)/.d 2>/dev/null
 
 $(objdir)/$(PACKAGE).8: $(objdir)/$(PACKAGE) $(srcdir)/misc/man.extra
-	$(HELP2MAN) -i $(srcdir)/misc/man.extra -N -s 8 -S 'FailOS' $< > $@
+	-$(HELP2MAN) -i $(srcdir)/misc/man.extra -N -s 8 -S 'FailOS' $< > $@
 
 $(objdir)/$(PACKAGE): $(package_OBJS)
 	$(CC) $(LDFLAGS) $(package_OBJS) -o $@
