@@ -1,0 +1,10 @@
+[COPYRIGHT]
+Copyright \(co 2017+ Ian Kirk. Please see the file COPYING for the licence terms.
+[AUTHOR]
+Ian Kirk
+[REPORTING BUGS]
+Please file any bug report at:
+
+	https://github.com/juur/tmpfilesd/issues
+[SEE ALSO]
+\fBtmpfiles.d\fR(5)
