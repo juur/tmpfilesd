@@ -7,11 +7,14 @@ set -o nounset
 show_help() 
 {
 	cat <<EOF
-	Usage: configure [options]
+Usage: configure [OPTION]...
+
 Configuration:
-  --help                    print this message
-  --target=TARGET           cross-compile target
-Directory and file names:
+  -h, --help             print this message
+      --target=TARGET    cross-compile target
+  -q, --quiet, --silent  be quiet
+
+Installation directories:
   --bindir=DIR
   --datadir=DIR
   --datarootdir=DIR
@@ -29,6 +32,13 @@ Directory and file names:
   --sharedstatedir=DIR
   --sysconfdir=DIR
 
+Ignored for compatibility:
+  --build=BUILD
+  --host=HOST
+  --program-prefix=PROGRAMPREFIX
+  --disable-dependency-tracking
+  --enable-dependency-tracking
+
 EOF
 }
 
@@ -38,7 +48,7 @@ DEPS=1
 while :; do
 	case ${1:-} in
 		-h|--help) show_help; exit ;;
-		--quiet) QUIET=1 ;;
+		-q|--silent|--quiet) QUIET=1 ;;
 		--bindir=?*) BINDIR=${1#*=} ;;
 		--datadir=?*) DATADIR=${1#*=} ;;
 		--datarootdir=?*) DATAROOTDIR=${1#*=} ;;
