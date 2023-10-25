@@ -19,3 +19,5 @@ From the source, for RHEL/CentOS:
 
 ## References ##
 Uses some code from <https://github.com/troglobit/libite>, specifically: `mkpath()`.
+
+![CodeQL](https://github.com/juur/tmpfilesd/actions/workflows/github-code-scanning/codeql/badge.svg)
