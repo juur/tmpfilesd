@@ -58,7 +58,7 @@ $(objdir)/.d:
 	@mkdir -p $(objdir)/.d 2>/dev/null
 
 $(objdir)/$(PACKAGE).8: $(objdir)/$(PACKAGE)
-	$(HELP2MAN) -N -s 8 -S 'ZeroDay Linux' $< > $@
+	$(HELP2MAN) -N -s 8 -S 'FailOS' $< > $@
 
 $(objdir)/$(PACKAGE): $(package_OBJS)
 	$(CC) $(LDFLAGS) $(package_OBJS) -o $@
