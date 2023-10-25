@@ -57,10 +57,10 @@ while :; do
 		--sysconfdir=?*) SYSCONFDIR=${1#*=} ;;
 		--target=?*) TARGET=${1#*=} ;;
 # These are added to keep RPM %configure error free		
-		--build=?*) BUILD=${1#*=} ;;
-		--host=?*) HOST=${1#*=} ;;
-		--program-prefix=?*) PROGPREFIX=${1#*=} ;;
-		--program-prefix=) PROGPREFIX= ;;
+		--build=?*) ;;
+		--host=?*) ;;
+		--program-prefix=?*) ;;
+		--program-prefix=) ;;
 		--disable-dependency-tracking) DEPS=0 ;;
 		--enable-dependency-tracking) DEPS=1 ;;
 		*) [[ -n "${1-}" ]] && { echo "Unknown argument ${1}" >&2; exit 1; } ;;
@@ -76,9 +76,9 @@ else
 fi
 
 OBJDIR=$(pwd)
-SRCDIR=$(dirname ${0})
+SRCDIR=$(dirname "${0}")
 
-if [[ "$(realpath ${OBJDIR})" = "$(realpath ${SRCDIR})" ]]; then
+if [[ "$(realpath "${OBJDIR}")" = "$(realpath "${SRCDIR}")" ]]; then
 	echo "Building inside source directory."
 fi
 
@@ -124,22 +124,26 @@ CXX=${CXX:-${TOOL}g++}
 
 # Predefined values, which should not be easily changed
 
-PACKAGE=$(cat ${SRCDIR}/misc/PACKAGE)
-VERSION=$(cat ${SRCDIR}/misc/VERSION)
+PACKAGE=$(cat "${SRCDIR}/misc/PACKAGE")
+VERSION=$(cat "${SRCDIR}/misc/VERSION")
 
 # Check for a c compiler (mandatory)
 
 echo -n "Checking for a C compiler ... "
-if [[ ! -x "$(which ${CC})" ]]; then
+if [[ ! -x "$(which "${CC}")" ]]; then
 	fail "Error: CC not valid"
 else
 	export CC
-	echo "$(which ${CC})" | tee -a config.log
+	which "${CC}" | tee -a config.log
 fi
 
-echo -n "Checking $(basename ${CC}) can produce executables ... "
+echo -n "Checking $(basename "${CC}") can produce executables ... "
 echo -e '#include <stdlib.h>\nmain() {exit(0);}' | \
-	gcc -xc -o /dev/null - 2>>config.log && echo "Ok" || { echo "Fail"; exit 1; }
+	if ${CC} -xc -o /dev/null - 2>>config.log; then
+		echo "Ok"
+	else
+		{ echo "Fail"; exit 1; }
+	fi
 
 HOST_MACHINE=$(${CC} -dumpmachine)
 
@@ -169,19 +173,19 @@ LIB_CHECK=""
 # Check for pkg-config (mandatory)
 
 echo -n "Checking for pkg-config ... "
-if [[ ! -x "$(which ${PKG_CONFIG})" ]]; then
+if [[ ! -x "$(which "${PKG_CONFIG}")" ]]; then
 	fail "Error: PKG_CONFIG not valid"
 fi
 
 export PKG_CONFIG
-echo "$(which ${PKG_CONFIG})"
+which "${PKG_CONFIG}"
 
 # Support functions
 
 check_pkg() 
 {
 	echo -n "Checking for $1 ... "
-	$(${PKG_CONFIG} --exists "${1}")
+	"${PKG_CONFIG}" --exists "${1}"
 	local RT=$?
 	ok ${RT}
 	return ${RT}
@@ -196,8 +200,9 @@ fail()
 check_header()
 {
 	echo -n "Checking for ${1} ... "
-	$(echo "#include <${1}>" | \
-		${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} -E - -o /dev/null 2>>config.log)
+	# shellcheck disable=SC2086
+	echo "#include <${1}>" | \
+		${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS} -E - -o /dev/null 2>>config.log
 	local RT=$?
 	ok $?
 	return ${RT}
@@ -210,8 +215,9 @@ check_lib()
 	echo "#define _XOPEN_SOURCE 700" >${F}
 	echo 'main(){}' >>${F}
 	echo -n "Checking for -l${1} ... "
-	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} -l${1} ${F} \
-		-o /dev/null 2>>config.log)
+	# shellcheck disable=SC2086
+	${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} "-l${1}" ${F} \
+		-o /dev/null 2>>config.log
 	local RT=$?
 	ok ${RT}
 	rm -f ${F}
@@ -226,8 +232,10 @@ ok()
 check_func()
 {
 	local F=/tmp/$$.c
-	local FUNC="$(echo "${1}" | cut -d: -f1)"
-	local ARGS="$(echo "${1}" | cut -d: -f2-)"
+	local FUNC
+	FUNC="$(echo "${1}" | cut -d: -f1)"
+	local ARGS
+	ARGS="$(echo "${1}" | cut -d: -f2-)"
 
 	echo "#define _GNU_SOURCE" >${F}
 	for i in ${H_FILES} ; do
@@ -235,7 +243,8 @@ check_func()
 	done
 	echo "void main() { ${FUNC}(${ARGS}); }" >>${F}
 	echo -n "Checking for ${FUNC}() ... "
-	$(${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} ${F} -o /dev/null 2>>config.log)
+	# shellcheck disable=SC2086
+	${CC} ${LDFLAGS} ${CPPFLAGS} ${CFLAGS} ${F} -o /dev/null 2>>config.log
 	local RT=$?
 
 	ok ${RT}
@@ -245,14 +254,14 @@ check_func()
 
 # start a new configuration file
 if [[ -e ${OBJDIR}/config.h ]]; then 
-	mv -f ${OBJDIR}/config.h ${OBJDIR}/config.h~; 
+	mv -f "${OBJDIR}/config.h" "${OBJDIR}/config.h~"
 fi
-rm -f ${OBJDIR}/config.h
+rm -f "${OBJDIR}/config.h"
 
 # kludge any defines here
 
 # set-up defines
-echo "#define VERSION \"${VERSION}\"" >> ${OBJDIR}/config.h
+echo "#define VERSION \"${VERSION}\"" >> "${OBJDIR}/config.h"
 
 # package checks
 
@@ -273,16 +282,16 @@ done
 # This is done here to ensure relevant libraries are linked etc.
 
 for f in ${H_FILES} ; do
-	def=$(echo ${f} | sed "s#/#_#;s#\.#_#;s#/#_#;" | tr "[a-z]" "[A-Z]")
+	def=$(echo "${f}" | sed "s#/#_#;s#\.#_#;s#/#_#;" | tr "[:lower:]" "[:upper:]")
     if check_header "${f}"; then 
-		echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h
+		echo "#define HAVE_${def} 1" >> "${OBJDIR}/config.h"
 	fi
 done
 
 for f in ${FUNC_CHECK}; do
-	def=$(echo ${f} | cut -d: -f1 | tr "[a-z]" "[A-Z]")
+	def=$(echo "${f}" | cut -d: -f1 | tr "[:lower:]" "[:upper:]")
 	if check_func "${f}"; then 
-		echo "#define HAVE_${def} 1" >> ${OBJDIR}/config.h
+		echo "#define HAVE_${def} 1" >> "${OBJDIR}/config.h"
 	fi
 done
 
@@ -323,7 +332,7 @@ ARGS=$(cat <<- __END
 __END
 )
 
-cat ${SRCDIR}/Makefile.in | sed "${ARGS}" > ${OBJDIR}/Makefile
+sed "${ARGS}" <"${SRCDIR}/Makefile.in" >"${OBJDIR}/Makefile"
 
 echo "Please type make to continue"
 
