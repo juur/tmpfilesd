@@ -495,12 +495,11 @@ errno = ENOSYS;
 return -1;
 }*/
 
+__attribute__((nonnull))
 static int dummyunlink(const char *path)
 {
-	if (path)
-		fprintf(stderr, "dummyunlink(%s)\n", path);
-	errno = EPERM;
-	return -1;
+	warnx("unlink(%s)", path);
+	return unlink(path);
 }
 
 static int rmfile(const char *path)
@@ -509,77 +508,93 @@ static int rmfile(const char *path)
 		warnx("path is NULL");
 		errno = EINVAL;
 		return -1;
-	} else if (dummyunlink(path)) {
-		warn("unlink(%s)", path);
+	} 
+
+	return dummyunlink(path);
+}
+
+static int rmifold(const char *path, struct timeval *tv)
+{
+	if ( !path || !tv || !*path ) {
+		errno = EINVAL;
 		return -1;
 	}
 
-	return 0;
-}
-
-static void rmifold(const char *path, struct timeval *tv)
-{
-	if ( !path || !tv || !*path )
-		return;
+	printf("rmifold(%s, %ld)\n", path, tv->tv_sec);
 
 	struct stat sb;
 	int fd;
 
 	if ( (fd = open(path, O_RDONLY)) == -1) {
 		warn("open(%s)", path);
-		return;
+		return -1;
 	}
 
 	if (fstat(fd, &sb) == -1 ) {
 		close(fd);
 		warn("fstat(%s)", path);
-		return;
+		return -1;
 	}
 
 	close(fd);
 
+	time_t now;
+
+	now = time(NULL);
+
+	printf("%s mtime=%lu now=%lu age=%lu diff=%lu\n",
+			path,
+			sb.st_mtime,
+			time(0),
+			tv->tv_sec,
+			time(0) - sb.st_mtime);
+
 	if (S_ISDIR(sb.st_mode)) {
 		errno = ENOSYS;
 		warn("aged delete folder(%s)", path);
-		return;
-	} else {
-		printf("%s mtime=%lu now=%lu age=%lu\n",
-				path,
-				sb.st_mtime,
-				time(0),
-				tv->tv_sec);
+		return -1;
+	} else if ((now - sb.st_mtime) > tv->tv_sec) {
+		return dummyunlink(path);
 	}
 
-	printf("rmifold(%s, %ld)\n", path, tv->tv_sec);
+	return 0;
 }
 
-static int rmrf(const char *path)
+static int rmrf(const char *path, struct timeval *tv)
 {
 	if (!path) {
 		errno = EINVAL;
 		return -1;
 	}
 
+	printf("rmrf(%s, %p)\n", path, tv);
+
 	char *buf = NULL;
 	struct stat sb;
 	int fd = -1;
 
-	if ( (fd = open(path, O_RDONLY)) == -1) 
-		return fd;
+	if ( (fd = open(path, O_RDONLY)) == -1)  {
+		warn("rmrf: open");
+		return -1;
+	}
 
 	if (fstat(fd, &sb) == -1) {
+		warn("rmrf: fstat");
 		close(fd);
 		return -1;
 	}
 
 	close(fd);
 
-	DIR *d = opendir(path);
-	struct dirent *ent;
-
 	if (S_ISDIR(sb.st_mode)) {
-		if (!d) 
+		DIR *d = opendir(path);
+
+		if (!d) {
+			warn("rmrf: opendir");
 			return -1;
+		}
+
+		struct dirent *ent;
 
 		while ( (ent = readdir(d)) )
 		{
@@ -588,7 +603,7 @@ static int rmrf(const char *path)
 
 			if ( (buf = pathcat(path, ent->d_name)) ) 
 			{
-				if (rmrf(buf)) {
+				if (rmrf(buf, tv)) {
 					free(buf);
 					break;
 				}
@@ -600,10 +615,9 @@ static int rmrf(const char *path)
 
 		if (errno) 
 			return -1;
-
+	} else if (tv) {
+		return rmifold(path, tv);
 	} else {
-		// FIXME set errno?
-		printf("not a dir\n");
 		return rmfile(path);
 	}
 
@@ -741,7 +755,7 @@ static void process_line(const char *line)
 				for (i=0;i<(int)nglobs;i++)
 				{
 					if (act&0x1) {
-						if (rmrf(globs[i]))
+						if (rmrf(globs[i], NULL))
 							warn("rmrf(%s)",globs[i]);
 					} else rmfile(globs[i]);
 
@@ -884,7 +898,7 @@ static void process_line(const char *line)
 							if ( (buf = pathcat(path, dirent->d_name)) )
 							{
 								if (do_clean && age)
-									rmifold(buf, age);
+									rmrf(buf, age);
 								else
 									dummyunlink(buf);
 								free(buf);
@@ -894,7 +908,7 @@ static void process_line(const char *line)
 
 					} else {
 						if (do_clean && age)
-							rmifold(path, age);
+							rmrf(path, age);
 						else
 							dummyunlink(path);
 					}
@@ -910,7 +924,7 @@ static void process_line(const char *line)
 					fd = open(path, O_DIRECTORY|O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
 					else if (fd != -1 && !(act&0x1)) break;
-					else if (fd != -1 && rmrf(path))
+					else if (fd != -1 && rmrf(path, NULL))
 						warn("rmrf(%s)", path);
 
 					if (fd != -1)
@@ -919,8 +933,8 @@ static void process_line(const char *line)
 					fd = mkpath(path, (defmode ? DEF_FOLD : mode));
 					if (fd == -1)
 						warn("mkpathr(%s)", path);
-					else if (fchown(fd, uid, gid))
-						warn("fchown(%s)", path);
+					else if (chown(path, uid, gid))
+						warn("chown(%s)", path);
 				}
 
 				break;
@@ -934,13 +948,18 @@ static void process_line(const char *line)
 			case CREAT_FILE:
 			case TRUNC_FILE:
 				if (do_create) {
+					/* TODO this should skip if exists */
 					fd = open(path, 
-							O_CREAT|( (act & 0x1) ? O_TRUNC:0 ),
+							O_RDWR|O_CREAT|( (act == TRUNC_FILE) ? O_TRUNC:0 ),
 							(defmode ? DEF_FILE : mode)
 							);
-					if (fd == -1) warn("open(%s)", path);
-					else if (fchown(fd, uid, gid))
+					if (fd == -1) {
+						warn("open(%s)", path);
+						break;
+					} else if (fchown(fd, uid, gid))
 						warn("fchown(%s)", path);
+
+					close(fd);
 				}
 				break;
 
@@ -966,16 +985,18 @@ static void process_line(const char *line)
 				if (do_create) {
 					fd = open(path, O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
-					else if (fd != -1 && suff != '~') break;
-					else if (fd != -1) dummyunlink(path);
+					else if (fd != -1 && suff == '+' && dummyunlink(path)) {
+						warn("CREATE_PIPE: unlink");
+						break;
+					}
 
 					if (fd != -1)
 						close(fd);
 
 					if ( (fd = mkfifo(path, mode)) )
 						warn("mkfifo(%s)", path);
-					else if (fchown(fd, uid, gid))
-						warn("fchown(%s)", path);
+					else if (chown(path, uid, gid))
+						warn("chown(%s)", path);
 				}
 				break;
 
@@ -993,24 +1014,43 @@ static void process_line(const char *line)
 					else
 						dest = strdup(arg);
 
-					fd = open(path, O_RDONLY);
-					if (fd == -1 && errno != ENOENT) break;
-					else if (fd != -1 && suff != '~') break;
-					else if (fd != -1 && dummyunlink(path)) 
+					if (dest == NULL) {
+						warn("CREATE_SYM: dest");
+						break;
+					}
+
+					struct stat sb;
+					fd = lstat(path, &sb);
+
+					if (fd == -1 && errno != ENOENT) {
+						/* failed to stat with a worrying error */
+						warn("CREATE_SYM: open");
+						break;
+					} else if (fd == -1) { 
+						/* must be ENOENT, so fine */
+					} else if (!S_ISLNK(sb.st_mode) && suff == '+') {
+						/* if the existing file is NOT a symlink, we have a problem */
+						warnx("CREATE_SYM: existing file is not a symlink: %s", path);
+						break;
+					} else if (suff != '+') {
+						/* file exists so ignore */
+						break;
+					} else if (suff == '+' && dummyunlink(path)) {
+						/* file exists, but we had a problem removing it first */
 						warn("unlink(%s)", path);
-					if (fd != -1)
-						close(fd);
+						break;
+					}
 
 					fd = symlink(dest, path);
 					if (fd == -1)
 						warn("symlink(%s, %s)", dest, path);
-					else {
-						// FIXME - should this be DEF only or not used?
-						if (fchown(fd, uid, gid))
-							warn("fchown(%s)", path);
-						if (fchmod(fd, (defmode ? DEF_FOLD : mode)))
-							warn("fchmod(%s)", path);
-					}
+					/* we don't chown/chmod symlinks */
+					/* else {
+						if (lchown(path, uid, gid))
+							warn("chown(%s)", path);
+						if (chmod(path, (defmode ? DEF_FOLD : mode)))
+							warn("chmod(%s)", path);
+					}*/
 				}
 				break;
 
@@ -1022,8 +1062,9 @@ static void process_line(const char *line)
 			case CREATE_CHAR:
 				if (do_create) {
 					fd = open(path, O_RDONLY);
+					/* FIXME logic is wrong */
 					if (fd == -1 && errno != ENOENT) break;
-					if (fd != -1 && suff != '~') break;
+					if (fd != -1 && suff != '+') break;
 					else if (fd != -1) dummyunlink(path);
 
 					if (fd != -1)
@@ -1032,8 +1073,8 @@ static void process_line(const char *line)
 					if ( (fd = mknod(path, (defmode ? 
 										DEF_FILE : mode)|S_IFCHR, dev)) )
 						warn("mknod(%s)", path);
-					else if (fchown(fd, uid, gid))
-						warn("fchown(%s)", path);
+					else if (chown(path, uid, gid))
+						warn("chown(%s)", path);
 				}
 				break;
 
@@ -1236,10 +1277,13 @@ int main(int argc, char * const argv[])
 	if (!root)
 		root = "";
 
+
+#ifdef DEBUG
 	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
 			"do_remove=%d,do_boot=%d\nroot=%s\n",
 			do_create, do_clean, do_remove, do_boot,
 			root);
+#endif
 
 	process_folder(pathcat(root, "/etc/tmpfiles.d"));
 	process_folder(pathcat(root, "/run/tmpfiles.d"));

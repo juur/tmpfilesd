@@ -22,7 +22,7 @@
 #include <libgen.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <alloca.h>
+//#include <alloca.h>
 #include <string.h>
 //#include "lite.h"
 
@@ -37,6 +37,7 @@
 int mkpath(char *dir, mode_t mode)
 {
 	struct stat sb;
+	char *tmp;
 
 	if (!dir) {
 		errno = EINVAL;
@@ -46,8 +47,12 @@ int mkpath(char *dir, mode_t mode)
 	if (!stat(dir, &sb))
 		return 0;
 
-	/* TODO: fix the memory leak on strdup */
+	if ((tmp = strdup(dir)) == NULL)
+		return 1;
+
 	mkpath(dirname(strdup(dir)), mode);
+
+	free(tmp);
 
 	return mkdir(dir, mode);
 }

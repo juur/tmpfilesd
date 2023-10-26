@@ -164,7 +164,7 @@ echo "objdir = ${OBJDIR} / srcdir = ${SRCDIR}"
 
 # List of system headers we need to check for
 
-H_FILES="stdlib.h stdint.h stdio.h string.h getopt.h err.h dirent.h errno.h ctype.h sys/time.h sys/types.h pwd.h grp.h unistd.h sys/utsname.h glob.h sys/stat.h fcntl.h time.h stdbool.h limits.h unistd.h stdlib.h errno.h libgen.h sys/stat.h sys/types.h alloca.h string.h stdlib.h stdio.h string.h err.h unistd.h ctype.h"
+H_FILES="ctype.h dirent.h err.h errno.h fcntl.h getopt.h glob.h grp.h libgen.h limits.h pwd.h stdbool.h stdint.h stdio.h stdlib.h string.h sys/stat.h sys/time.h sys/types.h sys/utsname.h time.h unistd.h"
 
 # List of system functions to check for function:arg0,arg1
 
