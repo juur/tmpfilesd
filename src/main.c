@@ -562,12 +562,12 @@ static int rmifold(const char *path, struct timeval *tv)
 
 static int rmrf(const char *path, struct timeval *tv)
 {
-	if (!path) {
+	if (!path || !strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	printf("rmrf(%s, %p)\n", path, tv);
+	//printf("rmrf(%s, %p)\n", path, tv);
 
 	char *buf = NULL;
 	struct stat sb;
@@ -623,13 +623,6 @@ static int rmrf(const char *path, struct timeval *tv)
 
 	return 0;
 }
-
-/*
-   struct action actions = {
-// ?,	mode,		replace?
-{ 'f',	CREAT_FILE,	false,	
-};
-*/
 
 static void process_line(const char *line)
 {
@@ -731,6 +724,7 @@ static void process_line(const char *line)
 				{
 					dest = pathcat(root, arg);
 					for (i=0; i<(int)nglobs; i++) {
+						/* TODO */
 						printf("[%u] write %s=%s %s%s", i, path, dest, 
 								do_clean ? "clean " : "",
 								do_create ? "create " : "");
@@ -783,8 +777,7 @@ static void process_line(const char *line)
 					ignores[ignores_size].contents = (act == IGN) ? true : false;
 					ignores_size++;
 
-					printf("[%u] ignore/r %s\n", 
-							i, globs[i]);
+					//printf("[%u] ignore/r %s\n", i, globs[i]);
 				}
 				break;
 
@@ -845,6 +838,7 @@ static void process_line(const char *line)
 				if (do_create) {
 					dest = pathcat(root, arg);
 					for (i=0; i<(int)nglobs; i++) {
+						/* TODO */
 						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
 					}
 				}
@@ -865,6 +859,7 @@ static void process_line(const char *line)
 				if (do_create) {
 					dest = pathcat(root, arg);
 					for (i=0; i<(int)nglobs; i++) {
+						/* TODO */
 						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
 					}
 				}
@@ -972,6 +967,7 @@ static void process_line(const char *line)
 			case COPY:
 				if (do_create) {
 					dest = pathcat(root, arg);
+					/* TODO */
 					printf("src=%s\n", dest);
 				}
 				break;
