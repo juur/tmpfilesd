@@ -12,10 +12,10 @@
 char *trim(char *str)
 {
 
-	if (str == NULL) {
-		warnx("str is NULL");
-		return str;
-	}
+	//if (str == NULL) {
+	//	warnx("str is NULL");
+	//	return str;
+	//}
 
 	char *ret = str;
 	int i, len;
@@ -47,7 +47,7 @@ char *trim(char *str)
 
 int is_dot(const char *path)
 {
-	if( !path || !*path ) return 0;
+	if( /*!path ||*/ !*path ) return 0;
 
 	if( !strcmp(path, ".") || !strcmp(path, ".." ) )
 		return 1;
@@ -57,7 +57,7 @@ int is_dot(const char *path)
 
 char *pathcat(const char *a, const char *b)
 {
-	if ( !a || !b ) return NULL;
+	//if ( !a || !b ) return NULL;
 
 	size_t len = strlen(a) + strlen(b) + 2;
 	char *ret = malloc(len);

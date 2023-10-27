@@ -54,6 +54,13 @@
 #define DEF_FILE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
 #define DEF_FOLD (DEF_FILE|S_IXUSR|S_IXGRP|S_IXOTH)
 
+#define MOD_BOOT_ONLY    (1<<0)
+#define MOD_NO_ERR       (1<<1)
+#define MOD_NOMATCH_RM   (1<<2)
+#define MOD_BASE64       (1<<3)
+#define MOD_SERVICE_CRED (1<<4)
+#define MOD_PLUS         (1<<5)
+
 static int do_create=0, do_clean=0, do_remove=0, do_boot=0;
 static int do_help=0, do_version=0; 
 static char *prefix = NULL, *exclude = NULL, *root = NULL;
@@ -98,46 +105,41 @@ static void show_help(void)
 	exit(EXIT_SUCCESS);
 }
 
-static int validate_type(const char *raw, char *type, char *suff, 
-		int *boot_only)
+__attribute__((nonnull))
+static int validate_type(const char *raw, char *type)
 {
-	int l;
+	const char *tmp;
+	int ret;
 
-	if (!raw || !boot_only || !type || !suff)
-		return -1;
+	ret = 0;
 
-	l = strlen(raw);
-
-	*boot_only = 0;
 	*type = raw[0];
 
-	if (l == 2) {
-		if (raw[1] == '+')
-			*suff = raw[1];
-		else if (raw[1] == '!')
-			*boot_only = 1;
-		else
-			return -1;
+	for (tmp = (raw + 1); *tmp; tmp++)
+		switch (*tmp)
+		{
+			case '+': ret |= MOD_PLUS;       break;
+			case '~': ret |= MOD_BASE64;     break;
+			case '-': ret |= MOD_NO_ERR;     break;
+			case '!': ret |= MOD_BOOT_ONLY;  break;
+			case '=': ret |= MOD_NOMATCH_RM; break;
 
-	} else if (l == 3) {
-		if (raw[1] != '+' || raw[2] != '!') return -1;
-		*suff = raw[1];
-		*boot_only = 1;
+			case '^': 
+			default:
+				warnx("type modifier '%c' is unsupported", isprint(*type) ? *type : '?');
+				return -1;
+		}
 
-	} else if (l > 3) {
-		return -1;
-
-	}
-
-	return 0;
+	return ret;
 }
 
 /*
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
+__attribute__((nonnull))
 static uid_t vet_uid(const char **t, uid_t *defuid)
 {
-	if (!t || !*t || **t == '-') {
+	if (/*!t ||*/ !*t || **t == '-') {
 		*defuid = 1;
 		return 0;
 	}
@@ -160,9 +162,10 @@ static uid_t vet_uid(const char **t, uid_t *defuid)
 /*
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
+__attribute__((nonnull))
 static gid_t vet_gid(const char **t, gid_t *defgid)
 {
-	if (!t || !*t || **t == '-') {
+	if (/*!t ||*/ !*t || **t == '-') {
 		*defgid = 1;
 		return 0;
 	}
@@ -236,7 +239,9 @@ static const char *gethost(void)
 	if (hostname)
 		return hostname;
 
-	hostname = calloc(1, HOST_NAME_MAX + 1);
+	if ((hostname = calloc(1, HOST_NAME_MAX + 1)) == NULL)
+		return NULL;
+
 	if (gethostname(hostname, HOST_NAME_MAX)) {
 		warn("gethostname");
 		free(hostname);
@@ -278,9 +283,10 @@ static const char *getmachineid(void)
  *
  * If prefixed with "~" this is masked on the already set bits.
  */
+__attribute__((nonnull))
 static int vet_mode(const char **t, int *mask, int *defmode)
 {
-	if (!t || !*t || **t == '-') {
+	if (/*!t ||*/ !*t || **t == '-') {
 		*defmode = 1;
 		return -1;
 	}
@@ -307,10 +313,11 @@ static int vet_mode(const char **t, int *mask, int *defmode)
 }
 
 #define LEN 1024
+__attribute__((nonnull))
 static char *expand_path(char *path)
 {
-	if (!path)
-		return NULL;
+	//if (!path)
+	//	return NULL;
 
 	char *buf = calloc(1, LEN+1);
 	char *ptr = path;
@@ -377,6 +384,7 @@ static char *expand_path(char *path)
  * %v - Kernel release (uname -r)
  * %% - %
  */
+__attribute__((nonnull))
 static char *vet_path(char *path)
 {
 	if (strchr(path, '%'))
@@ -395,9 +403,10 @@ static char *vet_path(char *path)
  * but not the files and directories immediately inside it.
  */
 
+__attribute__((nonnull))
 static struct timeval *vet_age(const char **t, int *subonly)
 {
-	if (!t || !*t || **t == '-')
+	if (/*!t ||*/ !*t || **t == '-')
 		return NULL;
 
 	uint64_t val;
@@ -456,13 +465,11 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	return(tv);
 }
 
+__attribute__((nonnull))
 static int glob_file(const char *path, char ***matches, size_t *count,
 		glob_t **pglob)
 {
 	int r;
-
-	if (path == NULL)
-		return -1;
 
 	if (*pglob == NULL) {
 		*pglob = calloc(1, sizeof(glob_t));
@@ -472,9 +479,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 		}
 	}
 
-	r = glob(path, GLOB_NOSORT, NULL, *pglob);
-
-	if (r) {
+	if ((r = glob(path, GLOB_NOSORT, NULL, *pglob))) {
 		if (r != GLOB_NOMATCH) warnx("glob returned %u", r);
 		*matches = NULL;
 		*count = 0;
@@ -488,40 +493,20 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 	return r;
 }
 
-/*static int unlinkfolder(const char *path)
-  {
-//printf("rm-rf %s\n", path);
-errno = ENOSYS;
-return -1;
-}*/
+__attribute__((nonnull))
+static int unlink_wrapper(const char *pathname, bool check_ignores)
+{
+	if (check_ignores)
+		for (int i = 0; i < ignores_size; i++)
+			if (!strcmp(pathname, ignores[i].path))
+				return 0;
+
+	return unlink(pathname);
+}
 
 __attribute__((nonnull))
-static int dummyunlink(const char *path)
+static int rmifold(const char *path, const struct timeval *tv, bool check_ignores)
 {
-	warnx("unlink(%s)", path);
-	return unlink(path);
-}
-
-static int rmfile(const char *path)
-{
-	if (!path) {
-		warnx("path is NULL");
-		errno = EINVAL;
-		return -1;
-	} 
-
-	return dummyunlink(path);
-}
-
-static int rmifold(const char *path, struct timeval *tv)
-{
-	if ( !path || !tv || !*path ) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	printf("rmifold(%s, %ld)\n", path, tv->tv_sec);
-
 	struct stat sb;
 	int fd;
 
@@ -538,9 +523,7 @@ static int rmifold(const char *path, struct timeval *tv)
 
 	close(fd);
 
-	time_t now;
-
-	now = time(NULL);
+	time_t now = time(NULL);
 
 	printf("%s mtime=%lu now=%lu age=%lu diff=%lu\n",
 			path,
@@ -554,20 +537,19 @@ static int rmifold(const char *path, struct timeval *tv)
 		warn("aged delete folder(%s)", path);
 		return -1;
 	} else if ((now - sb.st_mtime) > tv->tv_sec) {
-		return dummyunlink(path);
+		return unlink_wrapper(path, check_ignores);
 	}
 
 	return 0;
 }
 
-static int rmrf(const char *path, struct timeval *tv)
+__attribute__((nonnull(1)))
+static int rmrf(const char *path, const struct timeval *tv, bool check_ignores)
 {
-	if (!path || !strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
+	if (/*!path ||*/ !strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
 		errno = EINVAL;
 		return -1;
 	}
-
-	//printf("rmrf(%s, %p)\n", path, tv);
 
 	char *buf = NULL;
 	struct stat sb;
@@ -603,7 +585,7 @@ static int rmrf(const char *path, struct timeval *tv)
 
 			if ( (buf = pathcat(path, ent->d_name)) ) 
 			{
-				if (rmrf(buf, tv)) {
+				if (rmrf(buf, tv, check_ignores)) {
 					free(buf);
 					break;
 				}
@@ -616,34 +598,34 @@ static int rmrf(const char *path, struct timeval *tv)
 		if (errno) 
 			return -1;
 	} else if (tv) {
-		return rmifold(path, tv);
+		return rmifold(path, tv, check_ignores);
 	} else {
-		return rmfile(path);
+		return unlink_wrapper(path, check_ignores);
 	}
 
 	return 0;
 }
 
+__attribute__((nonnull))
 static void process_line(const char *line)
 {
-	if (line == NULL) 
-		return;
-
 	char *rawtype = NULL, *tmppath = NULL, *path = NULL; 
 	char *modet = NULL, *dest = NULL;
 	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
-	char type, suff = '\0';
+	char type;
 	int boot_only = 0, act = -1, subonly = 0;
 	int fields = 0, defmode = 0;
 	char **globs = NULL;
 	size_t nglobs = 0;
 	glob_t *fileglob = NULL;
 	int fd = -1;
+	int ret;
 
 	uid_t uid = 0; uid_t defuid = 0;
 	gid_t gid = 0; gid_t defgid = 0;
 	mode_t mode = 0; int mask = 0;
 	dev_t dev = 0;
+	int mod = 0;
 
 	struct timeval *age = NULL;
 
@@ -661,7 +643,7 @@ static void process_line(const char *line)
 		warnx("bad line: %s\n", line);
 		goto cleanup;
 		return;
-	} else if ( validate_type(rawtype, &type, &suff, &boot_only) ) {
+	} else if ( (mod = validate_type(rawtype, &type)) == -1 ) {
 		warnx("bad type: %s\n", line);
 		goto cleanup;
 		return;
@@ -706,6 +688,9 @@ static void process_line(const char *line)
 	if (aget) age = vet_age((const char **)&aget, &subonly);
 	if (path) path = vet_path(path);
 
+	if (path == NULL)
+		return;
+
 	int i;
 
 	if ( (do_boot && boot_only) || !boot_only ) {
@@ -744,14 +729,18 @@ static void process_line(const char *line)
 				 */
 			case RM:
 			case RMRF:
-				if (!do_remove) break;
+				if (!do_remove) 
+					break;
+				
 				glob_file(path, &globs, &nglobs, &fileglob);
-				for (i=0;i<(int)nglobs;i++)
+
+				for (i = 0; i < (int)nglobs; i++)
 				{
-					if (act&0x1) {
-						if (rmrf(globs[i], NULL))
+					if (act == RMRF) {
+						if (rmrf(globs[i], NULL, false))
 							warn("rmrf(%s)",globs[i]);
-					} else rmfile(globs[i]);
+					} else
+						unlink_wrapper(globs[i], false);
 
 				}
 				break;
@@ -839,7 +828,7 @@ static void process_line(const char *line)
 					dest = pathcat(root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
-						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
+						warnx("[%u] path=%s dest=%s\n", i, globs[i], dest);
 					}
 				}
 				//printf("chattr/chattrr\n\n");
@@ -870,6 +859,7 @@ static void process_line(const char *line)
 			case CREATE_SVOL:
 				//				errno = ENOSYS;
 				//				warn("subvol(%s)", path);
+				break;
 
 				/* d - create a directory (if does not exist)
 				 * D - create a direcotry (delete contents if exists)
@@ -893,9 +883,9 @@ static void process_line(const char *line)
 							if ( (buf = pathcat(path, dirent->d_name)) )
 							{
 								if (do_clean && age)
-									rmrf(buf, age);
+									rmrf(buf, age, do_clean);
 								else
-									dummyunlink(buf);
+									unlink_wrapper(buf, do_clean);
 								free(buf);
 							}
 
@@ -903,9 +893,9 @@ static void process_line(const char *line)
 
 					} else {
 						if (do_clean && age)
-							rmrf(path, age);
+							rmrf(path, age, do_clean);
 						else
-							dummyunlink(path);
+							unlink_wrapper(path, false); /* FIXME is false correct? */
 					}
 				}
 
@@ -918,8 +908,8 @@ static void process_line(const char *line)
 					   */
 					fd = open(path, O_DIRECTORY|O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
-					else if (fd != -1 && !(act&0x1)) break;
-					else if (fd != -1 && rmrf(path, NULL))
+					else if (fd != -1 && !(act == MKDIR_RMF)) break;
+					else if (fd != -1 && rmrf(path, NULL, false))
 						warn("rmrf(%s)", path);
 
 					if (fd != -1)
@@ -980,9 +970,10 @@ static void process_line(const char *line)
 			case CREATE_PIPE:
 				if (do_create) {
 					fd = open(path, O_RDONLY);
-					if (fd == -1 && errno != ENOENT) break;
-					else if (fd != -1 && suff == '+' && dummyunlink(path)) {
-						warn("CREATE_PIPE: unlink");
+					if (fd == -1 && errno != ENOENT) 
+						break;
+					else if (fd != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
+						warn("CREATE_PIPE: unlink_wrapper");
 						break;
 					}
 
@@ -1016,24 +1007,24 @@ static void process_line(const char *line)
 					}
 
 					struct stat sb;
-					fd = lstat(path, &sb);
+					ret = lstat(path, &sb);
 
-					if (fd == -1 && errno != ENOENT) {
+					if (ret == -1 && errno != ENOENT) {
 						/* failed to stat with a worrying error */
 						warn("CREATE_SYM: open");
 						break;
-					} else if (fd == -1) { 
+					} else if (ret == -1) { 
 						/* must be ENOENT, so fine */
-					} else if (!S_ISLNK(sb.st_mode) && suff == '+') {
+					} else if (!S_ISLNK(sb.st_mode) && (mod & MOD_PLUS)) {
 						/* if the existing file is NOT a symlink, we have a problem */
 						warnx("CREATE_SYM: existing file is not a symlink: %s", path);
 						break;
-					} else if (suff != '+') {
+					} else if (!(mod & MOD_PLUS)) {
 						/* file exists so ignore */
 						break;
-					} else if (suff == '+' && dummyunlink(path)) {
+					} else if ((mod & MOD_PLUS) && unlink_wrapper(path, false)) {
 						/* file exists, but we had a problem removing it first */
-						warn("unlink(%s)", path);
+						warn("unlink_wrapper(%s)", path);
 						break;
 					}
 
@@ -1057,14 +1048,22 @@ static void process_line(const char *line)
 				 */
 			case CREATE_CHAR:
 				if (do_create) {
-					fd = open(path, O_RDONLY);
-					/* FIXME logic is wrong */
-					if (fd == -1 && errno != ENOENT) break;
-					if (fd != -1 && suff != '+') break;
-					else if (fd != -1) dummyunlink(path);
+					struct stat sb;
+					ret = stat(path, &sb);
 
-					if (fd != -1)
-						close(fd);
+					if (ret == -1 && errno != ENOENT) {
+						/* failed to stat with unknown error */
+						warn("CREATE_CHAR: lstat");
+						break;
+					} else if (ret == -1) {
+						/* NOENT: OK */
+					} else if (ret != -1 && !(mod & MOD_PLUS)) {
+						/* file exists, but not c+ */
+						break;
+					} else if (ret != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
+						warn("CREATE_CHAR: unlink_wrapper(%s)", path);
+						break;
+					}
 
 					if ( (fd = mknod(path, (defmode ? 
 										DEF_FILE : mode)|S_IFCHR, dev)) )
@@ -1113,6 +1112,7 @@ cleanup:
 		globfree(fileglob);
 }
 
+__attribute__((nonnull(1)))
 static void process_file(const char *file, const char *folder)
 {
 	char *in = NULL;
@@ -1121,10 +1121,10 @@ static void process_file(const char *file, const char *folder)
 	ssize_t cnt = 0;
 	size_t ignore = 0;
 
-	if (file == NULL) {
-		warnx("file is NULL");
-		return;
-	}
+	//if (file == NULL) {
+	//	warnx("file is NULL");
+	//	return;
+	//}
 
 	if (folder) {
 		if ( !(in = calloc(1, (len = strlen(file) + 
@@ -1170,6 +1170,7 @@ static void process_file(const char *file, const char *folder)
 #define CFG_EXT ".conf"
 #define CFG_EXT_LEN sizeof(CFG_EXT)
 
+__attribute__((nonnull))
 static void process_folder(const char *folder)
 {
 	DIR *dirp;
@@ -1214,7 +1215,7 @@ static struct option long_options[] = {
 };
 
 
-int main(int argc, char * const argv[])
+int main(int argc, char *argv[])
 {
 	int c, fail = 0;
 
