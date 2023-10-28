@@ -68,7 +68,7 @@ typedef enum {
 
 /* long_opt values */
 static int do_create=0, do_clean=0, do_remove=0, do_boot=0;
-static int do_help=0, do_version=0; 
+static int do_help=0, do_version=0, debug=0, debug_unlink=0; 
 
 static char *opt_prefix = NULL, *opt_exclude = NULL, *opt_root = NULL;
 static char **config_files = NULL;
@@ -82,6 +82,7 @@ static char *bootid = NULL;
 
 typedef struct ignent {
 	char path[PATH_MAX];
+	size_t length;
 	bool contents;
 } ignent_t;
 
@@ -132,7 +133,7 @@ static int validate_type(const char *raw, char *type)
 
 			case '^': 
 			default:
-				warnx("type modifier '%c' is unsupported", isprint(*type) ? *type : '?');
+				warnx("type modifier '%c' is unsupported", isprint(*tmp) ? *tmp : '?');
 				return -1;
 		}
 
@@ -142,12 +143,12 @@ static int validate_type(const char *raw, char *type)
 /*
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
-__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static uid_t vet_uid(const char **t, uid_t *defuid)
 {
-	if (/*!t ||*/ !*t || **t == '-') {
+	if (!*t || **t == '-') {
 		*defuid = 1;
-		return 0;
+		return (uid_t)-1;
 	}
 
 	*defuid = 0;
@@ -168,12 +169,12 @@ static uid_t vet_uid(const char **t, uid_t *defuid)
 /*
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
-__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static gid_t vet_gid(const char **t, gid_t *defgid)
 {
 	if (!*t || **t == '-') {
 		*defgid = 1;
-		return 0;
+		return (gid_t)-1;
 	}
 
 	*defgid = 0;
@@ -480,76 +481,94 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	return(tv);
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static int glob_file(const char *path, char ***matches, size_t *count,
 		glob_t **pglob)
 {
 	int r;
 
-	if (*pglob == NULL) {
-		*pglob = calloc(1, sizeof(glob_t));
-		if (!*pglob) {
-			warn("calloc");
-			return -1;
-		}
+	errno = 0;
+
+	if (*pglob == NULL && (*pglob = calloc(1, sizeof(glob_t))) == NULL) {
+		warn("glob_file: calloc");
+		return -1;
 	}
 
 	if ((r = glob(path, GLOB_NOSORT, NULL, *pglob))) {
-		if (r != GLOB_NOMATCH) warnx("glob returned %u", r);
+		if (r != GLOB_NOMATCH) {
+			warnx("glob returned %u", r);
+			if (r == GLOB_NOSPACE)
+				errno = ENOMEM;
+			else if (r == GLOB_ABORTED)
+				errno = EIO;
+		} else
+			errno = ENOENT;
+		
+		globfree(*pglob);
+
+		*pglob = NULL;
 		*matches = NULL;
 		*count = 0;
-		globfree(*pglob);
-		*pglob = NULL;
+		r = -1;
 	} else {
 		*matches = (**pglob).gl_pathv;
 		*count = (**pglob).gl_pathc;
+		r = 0;
 	}
 
 	return r;
 }
 
+/* a wrapper function around unlink(3) that checks for ignored paths */
 __attribute__((nonnull,warn_unused_result))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
 {
-	if (check_ignores)
+	if (check_ignores) {
 		for (int i = 0; i < ignores_size; i++)
-			if (!strcmp(pathname, ignores[i].path))
+			/* where contents is true, we check as a prefix otherwise the entire path */
+			if (ignores[i].contents && !strncmp(pathname, ignores[i].path, ignores[i].length))
 				return 0;
+			else if (!strcmp(pathname, ignores[i].path))
+				return 0;
+	}
+
+	if (!strcmp("/", pathname) || !strcmp(".", pathname) || !strcmp("..", pathname))
+		errx(EXIT_FAILURE, "unlink: attempt to remove protected file");
+
+	if (debug) {
+		printf("DEBUG: unlink(%s)\n", pathname);
+		if (debug_unlink)
+			return 0;
+	}
 
 	return unlink(pathname);
 }
 
 __attribute__((nonnull,warn_unused_result))
-static int rmifold(const char *path, const struct timeval *tv, bool check_ignores)
+static int rm_if_old(const char *path, const struct timeval *tv, bool check_ignores)
 {
 	struct stat sb;
-	int fd;
+	time_t now;
 
-	if ( (fd = open(path, O_RDONLY)) == -1) {
-		warn("open(%s)", path);
+	if (lstat(path, &sb) == -1 ) {
+		warn("rm_if_old: lstat(%s)", path);
 		return -1;
 	}
 
-	if (fstat(fd, &sb) == -1 ) {
-		close(fd);
-		warn("fstat(%s)", path);
-		return -1;
-	}
+	now = time(NULL);
 
-	close(fd);
-
-	time_t now = time(NULL);
-
+#ifdef DEBUG
 	printf("%s mtime=%lu now=%lu age=%lu diff=%lu\n",
 			path,
 			sb.st_mtime,
 			time(0),
 			tv->tv_sec,
 			time(0) - sb.st_mtime);
+#endif
 
 	if (S_ISDIR(sb.st_mode)) {
-		errno = ENOSYS;
-		warn("aged delete folder(%s)", path);
+		errno = EISDIR;
+		warn("rm_if_old: folder(%s)", path);
 		return -1;
 	} else if ((now - sb.st_mtime) > tv->tv_sec) {
 		return unlink_wrapper(path, check_ignores);
@@ -558,40 +577,41 @@ static int rmifold(const char *path, const struct timeval *tv, bool check_ignore
 	return 0;
 }
 
-__attribute__((nonnull(1)))
-static int rmrf(const char *path, const struct timeval *tv, bool check_ignores)
+__attribute__((nonnull(1), warn_unused_result))
+static int rm_rf(const char *path, const struct timeval *tv, 
+		bool check_ignores, bool follow_symlinks)
 {
-	if (!strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
-		errno = EINVAL;
-		return -1;
-	}
+	/* protect some obvious errors */
+	if (!strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path))
+		errx(EXIT_FAILURE, "rm_rf: attempt to remove protected file");
 
 	char *buf = NULL;
 	struct stat sb;
-	int fd = -1;
+	DIR *d;
+	struct dirent *ent;
+	bool descend;
 
-	if ( (fd = open(path, O_RDONLY)) == -1)  {
-		warn("rmrf: open");
+	if (lstat(path, &sb) == -1) {
+		warn("rm_rf: fstat(%s)", path);
 		return -1;
 	}
 
-	if (fstat(fd, &sb) == -1) {
-		warn("rmrf: fstat");
-		close(fd);
-		return -1;
-	}
+	/* if the target is:
+	 * a directory: opendir & rm_rf() each entry
+	 * a symlink:   rm_rf() the symlink
+	 * otherwise:   rm_rf() the file
+	 */
 
-	close(fd);
-
-	if (S_ISDIR(sb.st_mode)) {
-		DIR *d = opendir(path);
-
-		if (!d) {
-			warn("rmrf: opendir");
+	if (!S_ISLNK(sb.st_mode) && S_ISDIR(sb.st_mode)) {
+		descend = true;
+	} else
+		descend = false;
+	
+	if (descend) {
+		if ((d = opendir(path)) == NULL) {
+			warn("rm_rf: opendir");
 			return -1;
 		}
-
-		struct dirent *ent;
 
 		while ( (ent = readdir(d)) )
 		{
@@ -600,10 +620,12 @@ static int rmrf(const char *path, const struct timeval *tv, bool check_ignores)
 
 			if ( (buf = pathcat(path, ent->d_name)) ) 
 			{
-				if (rmrf(buf, tv, check_ignores)) {
-					free(buf);
-					break;
-				}
+				if (lstat(buf, &sb) == -1)
+					continue;
+
+				if (rm_rf(buf, tv, check_ignores, follow_symlinks))
+					warnx("rm_rf: rm_rf(%s)", buf);
+
 				free(buf);
 			}
 		}
@@ -612,13 +634,13 @@ static int rmrf(const char *path, const struct timeval *tv, bool check_ignores)
 
 		if (errno) 
 			return -1;
-	} else if (tv) {
-		return rmifold(path, tv, check_ignores);
+		return 0;
 	} else {
-		return unlink_wrapper(path, check_ignores);
+	/* is not a folder */
+		return rm_if_old(path, tv, check_ignores);
 	}
 
-	return 0;
+	/* FIXME check how age checking on symbolic links should be handled */
 }
 
 __attribute__((nonnull))
@@ -637,8 +659,8 @@ static void process_line(const char *line)
 	int ret;
 	actions_t act;
 
-	uid_t uid = 0; uid_t defuid = 0;
-	gid_t gid = 0; gid_t defgid = 0;
+	uid_t uid = -1; uid_t defuid = 1;
+	gid_t gid = -1; gid_t defgid = 1;
 	mode_t mode = 0; int mask = 0;
 	dev_t dev = 0;
 	int mod = 0;
@@ -661,7 +683,7 @@ static void process_line(const char *line)
 		goto cleanup;
 
 	if ( (mod = validate_type(rawtype, &type)) == -1 ) {
-		warnx("bad type: %s\n", line);
+		warnx("process_line: bad type: %s\n", line);
 		goto cleanup;
 	} 
 
@@ -700,14 +722,15 @@ static void process_line(const char *line)
 	}
 
 	path = pathcat(opt_root, tmppath);
+	tmppath = NULL;
 	free(tmppath);
 
-	if (uidt) uid = vet_uid((const char **)&uidt, &defuid);
-	if (gidt) gid = vet_gid((const char **)&gidt, &defgid);
+	if (uidt) uid   = vet_uid((const char **)&uidt, &defuid);
+	if (gidt) gid   = vet_gid((const char **)&gidt, &defgid);
 	if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode);
 	// FIXME handle '~'
-	if (aget) age = vet_age((const char **)&aget, &subonly);
-	if (path) path = vet_path(path);
+	if (aget) age   = vet_age((const char **)&aget, &subonly);
+	if (path) path  = vet_path(path);
 
 	if (path == NULL)
 		return;
@@ -715,6 +738,7 @@ static void process_line(const char *line)
 	int i;
 
 	if ( (do_boot && boot_only) || !boot_only ) {
+
 		switch(act)
 		{
 
@@ -725,18 +749,24 @@ static void process_line(const char *line)
 			 * that is written to the file, suffixed by a newline
 			 */
 			case WRITE_ARG:
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob)) {
+					warn("WRITE_ARG: glob_file");
+					break;
+				}
 				if (do_create || (do_clean && age))
 				{
 					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
-						printf("[%u] write %s=%s %s%s", i, path, dest, 
-								do_clean ? "clean " : "",
-								do_create ? "create " : "");
-						if (do_clean && age)
-							printf("age=%lu", age->tv_sec);
-						puts("\n");
+						if (debug) {
+							printf("DEBUG: write %s=%s %s%s", path, dest, 
+									do_clean ? "clean " : "",
+									do_create ? "create " : "");
+
+							if (do_clean && age)
+								printf("age=%lu", age->tv_sec);
+							puts("\n");
+						}
 					}
 				}
 				break;
@@ -753,15 +783,19 @@ static void process_line(const char *line)
 				if (!do_remove) 
 					break;
 
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob)) {
+					if (errno != ENOENT)
+						warn("RM: glob_file");
+					break;
+				}
 
 				for (i = 0; i < (int)nglobs; i++)
 				{
 					if (act == RMRF) {
-						if (rmrf(globs[i], NULL, false))
-							warn("rmrf(%s)",globs[i]);
+						if (rm_rf(globs[i], NULL, false, false))
+							warn("RMRF: rmrf(%s)",globs[i]);
 					} else
-						if (unlink_wrapper(globs[i], false))
+						if (unlink_wrapper(globs[i], false) && errno != ENOENT)
 							warn("RM: unlink(%s):", globs[i]);
 
 				}
@@ -775,7 +809,12 @@ static void process_line(const char *line)
 				 */
 			case IGN:
 			case IGNR:
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob)) {
+					if (errno != ENOENT)
+						warn("IGN: glob_file");
+					break;
+				}
+
 				for (i=0; i<(int)nglobs; i++)
 				{
 					ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
@@ -786,9 +825,11 @@ static void process_line(const char *line)
 
 					strncpy(ignores[ignores_size].path, globs[i], PATH_MAX - 1);
 					ignores[ignores_size].contents = (act == IGN) ? true : false;
+					ignores[ignores_size].length   = strlen(ignores[ignores_size].path);
 					ignores_size++;
 
-					//printf("[%u] ignore/r %s\n", i, globs[i]);
+					if (debug)
+						printf("DEBUG: ignore/r %s\n", globs[i]);
 				}
 				break;
 
@@ -801,8 +842,14 @@ static void process_line(const char *line)
 				 */
 			case CHMOD:
 			case CHMODR:
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob) && errno) {
+					if (errno != ENOENT)
+						warn("CHMOD: glob_file");
+					break;
+				}
+
 				struct stat sb;
+
 				if (do_create) {
 					mode_t mmode = mode;
 
@@ -823,7 +870,8 @@ static void process_line(const char *line)
 							errno = ENOSYS;
 							warn("chmod(%s,%s)", globs[i], modet);
 						} else {
-							warnx("chmod(%s,%u)", globs[i], mmode);
+							if (debug)
+								printf("DEBUG: chmod/r %s,%u", globs[i], mmode);
 
 							if (chmod(globs[i], mmode))
 								warn("chmod(%s,%s)", globs[i], modet);
@@ -845,15 +893,20 @@ static void process_line(const char *line)
 				 */
 			case CHATTR:
 			case CHATTRR:
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob)) {
+					if (errno != ENOENT)
+						warn("CHATTR: glob_file");
+					break;
+				}
+
 				if (do_create) {
 					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
-						warnx("[%u] path=%s dest=%s\n", i, globs[i], dest);
+						if (debug)
+							printf("DEBUG: chattr/r path=%s dest=%s\n", globs[i], dest);
 					}
 				}
-				//printf("chattr/chattrr\n\n");
 				break;
 
 				/* a/a+ - Set POSIX ACLs. If suffixed with +, specified entries 
@@ -866,12 +919,18 @@ static void process_line(const char *line)
 				 */
 			case ACL:
 			case ACLR:
-				glob_file(path, &globs, &nglobs, &fileglob);
+				if (glob_file(path, &globs, &nglobs, &fileglob)) {
+					if (errno != ENOENT)
+						warn("ACL: glob_file");
+					break;
+				}
+
 				if (do_create) {
 					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
-						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
+						if (debug)
+							printf("DEBUG: acl/r path=%s dest=%s\n", globs[i], dest);
 					}
 				}
 				break;
@@ -888,13 +947,13 @@ static void process_line(const char *line)
 			case MKDIR:
 			case MKDIR_RMF:
 				if ( (do_clean && age) || (do_remove && act == MKDIR_RMF) ) {
-					//printf("mkdir do_clean age=%lu\n", age->tv_sec);
 					if (subonly) {
 						DIR *dirp = opendir(path);
 						struct dirent *dirent;
 						char *buf;
 
-						if (!dirp) break;
+						if (!dirp)
+							goto mkdir_skip;
 
 						while ( (dirent = readdir(dirp)) != NULL )
 						{
@@ -903,23 +962,33 @@ static void process_line(const char *line)
 
 							if ( (buf = pathcat(path, dirent->d_name)) )
 							{
-								if (do_clean && age)
-									rmrf(buf, age, do_clean);
-								else if (unlink_wrapper(buf, do_clean))
+								if (do_clean && age) {
+									if (rm_rf(buf, age, do_clean, true))
+										warn("MKDIR: rm_rf(%s)", buf);
+								} else if (unlink_wrapper(buf, do_clean) && errno != ENOENT)
 									warn("MKDIR: unlink(%s)", buf);
 								free(buf);
 							}
 
 						}
 
-					} else {
-						if (do_clean && age)
-							rmrf(path, age, do_clean);
-						else if (unlink_wrapper(path, false)) /* FIXME is false correct? */
-							warn("MKDIR: unlink(%s)", path);
+					} else { /* !subonly */
+						if (do_clean && age) {
+							/* tmpfiles.d(5) is ambiguous if d/D follow symlinks */
+							if (rm_rf(path, age, do_clean, false)) 
+								warn("MKDIR: rm_rf(%s)", path);
+							else if (debug)
+								printf("DEBUG: CLEAN: mkdir/r: %s\n", path);
+
+						} else if (do_remove) {
+							if (unlink_wrapper(path, false) && errno != ENOENT) /* FIXME is false correct? */
+								warn("MKDIR: unlink(%s)", path);
+							else if (debug)
+								printf("DEBUG: REMOVE: mkdir/r: %s\n", path);
+						}
 					}
 				}
-
+mkdir_skip:
 				if (do_create) {
 					/*
 					   printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, 
@@ -928,10 +997,16 @@ static void process_line(const char *line)
 					   (defmode ? DEF_FOLD : mode), uid, gid);
 					   */
 					fd = open(path, O_DIRECTORY|O_RDONLY);
-					if (fd == -1 && errno != ENOENT) break;
-					else if (fd == -1 && errno == ENOENT) /* OK */ ;
-					else if (fd != -1 && !(act == MKDIR_RMF)) break;
-					else if (fd != -1 && rmrf(path, NULL, false))
+
+					if (fd == -1 && errno != ENOENT) 
+						break;
+					else if (fd == -1 && errno == ENOENT) {
+						/* OK */ 
+					} else if (fd != -1 && !(act == MKDIR_RMF)) {
+						if (debug)
+							printf("DEBUG: SKIP: mkdir/r: %s\n", path);
+						break;
+					} else if (fd != -1 && rm_rf(path, NULL, false, false))
 						warn("rmrf(%s)", path);
 
 					if (fd != -1)
@@ -941,6 +1016,9 @@ static void process_line(const char *line)
 						warn("mkpathr(%s)", path);
 					else if (chown(path, uid, gid))
 						warn("chown(%s)", path);
+
+					if (debug)
+						printf("DEBUG: mkdir/r: %s\n", path);
 				}
 
 				break;
@@ -953,23 +1031,51 @@ static void process_line(const char *line)
 				 */
 			case CREAT_FILE:
 			case TRUNC_FILE:
+
+
 				if (do_clean && age) {
-					/* TODO */
+					if (rm_if_old(path, age, true))
+						warn("CREATE/TRUNC_FILE: rm_if_old %s", path);
+					else if (debug)
+						printf("DEBUG: CLEAN: %s\n", path);
+				}
+
+				if (do_remove) {
+					if (unlink_wrapper(path, true) && errno != ENOENT)
+						warn("CREATE/TRUNC_FILE: unlink_wrapper %s", path);
+					else if (debug)
+						printf("DEBUG: REMOVE: %s\n", path);
 				}
 
 				if (do_create) {
-					/* TODO this should skip if exists */
-					fd = open(path, 
-							O_RDWR|O_CREAT|( (act == TRUNC_FILE) ? O_TRUNC:0 ),
+					struct stat sb;
+					if (stat(path, &sb) == -1) {
+						if (errno != ENOENT) {
+							warn("CREATE/TRUNC_FILE: stat %s", path);
+							break;
+						}
+					} else if (act == CREAT_FILE) {
+						if (debug)
+							printf("DEBUG: SKIP: create/trunc_file: %s\n", path);
+						break;
+					}
+
+					if ((fd = open(path, 
+							O_RDWR|O_CREAT|( (act == TRUNC_FILE) ? O_TRUNC : 0 ),
 							(defmode ? DEF_FILE : mode)
-							);
-					if (fd == -1) {
+							)) == -1) {
 						warn("open(%s)", path);
 						break;
-					} else if (fchown(fd, uid, gid))
-						warn("fchown(%s)", path);
+					}
+
+					if (fchown(fd, uid, gid))
+						warn("CREATE/TRUNC_FILE: fchown(%s, %d, %d)", path, uid, gid);
 
 					close(fd);
+
+					if (debug)
+						printf("DEBUG: create/trunc_file %s\n", path);
+
 				}
 				break;
 
@@ -1009,10 +1115,16 @@ static void process_line(const char *line)
 					if (fd != -1)
 						close(fd);
 
-					if ( (fd = mkfifo(path, mode)) )
+					if ( mkfifo(path, mode) ) {
 						warn("mkfifo(%s)", path);
-					else if (chown(path, uid, gid))
+						break;
+					}
+					
+					if (chown(path, uid, gid))
 						warn("chown(%s)", path);
+
+					if (debug)
+						printf("DEBUG: create_pipe %s\n", path);
 				}
 				break;
 
@@ -1054,6 +1166,8 @@ static void process_line(const char *line)
 						break;
 					} else if (!(mod & MOD_PLUS)) {
 						/* file exists so ignore */
+						if (debug)
+							printf("DEBUG: SKIP: symlink dest=%s path=%s\n", dest, path);
 						break;
 					} else if ((mod & MOD_PLUS) && unlink_wrapper(path, false)) {
 						/* file exists, but we had a problem removing it first */
@@ -1061,21 +1175,18 @@ static void process_line(const char *line)
 						break;
 					}
 
-					fd = symlink(dest, path);
-					if (fd == -1)
+					if ( symlink(dest, path) == -1 ) {
 						warn("symlink(%s, %s)", dest, path);
-					/* we don't chown/chmod symlinks */
-					/* else {
-						if (lchown(path, uid, gid))
-							warn("chown(%s)", path);
-						if (chmod(path, (defmode ? DEF_FOLD : mode)))
-							warn("chmod(%s)", path);
-					}*/
+						break;
+					}
+					
+					if (debug)
+						printf("DEBUG: symlink dest=%s path=%s\n", dest, path);
 				}
 				break;
 
-				/* c - Create a pipe (FIFO) if it does not exist
-				 * c+ - Remove and create a pipe (FIFO)
+				/* c - Create a character file if it does not exist
+				 * c+ - Remove and create a character file
 				 *
 				 * Argument: ignored
 				 */
@@ -1096,17 +1207,24 @@ static void process_line(const char *line)
 						/* NOENT: OK */
 					} else if (ret != -1 && !(mod & MOD_PLUS)) {
 						/* file exists, but not c+ */
+						if (debug)
+							printf("DEBUG: SKIP: create_char %s\n", path);
 						break;
 					} else if (ret != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
 						warn("CREATE_CHAR: unlink_wrapper(%s)", path);
 						break;
 					}
 
-					if ( (fd = mknod(path, (defmode ? 
-										DEF_FILE : mode)|S_IFCHR, dev)) )
+					if ( mknod(path, (defmode ?  DEF_FILE : mode)|S_IFCHR, dev)) {
 						warn("mknod(%s)", path);
-					else if (chown(path, uid, gid))
+						break;
+					}
+					
+					if (chown(path, uid, gid))
 						warn("chown(%s)", path);
+
+					if (debug)
+						printf("DEBUG: create_char %s\n", path);
 				}
 				break;
 
@@ -1241,7 +1359,7 @@ static void process_folder(const char *folder)
 #undef CFG_EXT
 #undef CFG_EXT_LEN
 
-static struct option long_options[] = {
+static const struct option long_options[] = {
 
 	{"create",			no_argument,		&do_create,		true},
 	{"clean",			no_argument,		&do_clean,		true},
@@ -1252,6 +1370,8 @@ static struct option long_options[] = {
 	{"root",			required_argument,	0,				'r'},
 	{"help",			no_argument,		&do_help,		true},
 	{"version",			no_argument,		&do_version,	true},
+	{"debug",           no_argument,        &debug,         true},
+	{"debug-unlink",    no_argument,        &debug_unlink,  true},
 
 	{0,0,0,0}
 };
