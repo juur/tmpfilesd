@@ -56,8 +56,8 @@ typedef enum {
 
 #define MAX(a, b) (a < b ? b : a)
 
-#define DEF_FILE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)
-#define DEF_FOLD (DEF_FILE|S_IXUSR|S_IXGRP|S_IXOTH)
+#define DEF_FILE ((mode_t)(S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH))
+#define DEF_FOLD ((mode_t)(DEF_FILE|S_IXUSR|S_IXGRP|S_IXOTH))
 
 #define MOD_BOOT_ONLY    (1<<0)
 #define MOD_NO_ERR       (1<<1)
@@ -291,11 +291,11 @@ static const char *getmachineid(void)
  * If prefixed with "~" this is masked on the already set bits.
  */
 __attribute__((nonnull))
-static int vet_mode(const char **t, int *mask, int *defmode)
+static mode_t vet_mode(const char **t, mode_t *mask, mode_t *defmode)
 {
 	if (!*t || **t == '-') {
 		*defmode = 1;
-		return -1;
+		return 0;
 	}
 
 	*defmode = 0;
@@ -305,18 +305,27 @@ static int vet_mode(const char **t, int *mask, int *defmode)
 	if (*mod == '~') {
 		*mask = 1;
 		mod++;
-		return -1;
 	} else
 		*mask = 0;
 
 	if (!isnumber(mod)) {
 		errno = EINVAL;
-		warn("vet_mode(%s)",mod);
 		return -1;
 	}
 
 	// FIXME this is wrong :-(
-	return strtol(mod, NULL, 8);
+	char *endptr;
+	long ret;
+
+	errno = 0;
+	ret = strtol(mod, &endptr, 8);
+
+	if (errno || endptr == mod) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return (mode_t) ret;
 }
 
 /* TODO stop doing free(path) as pointer may be reused by callers */
@@ -651,7 +660,7 @@ static void process_line(const char *line)
 	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
 	char type;
 	int boot_only = 0, subonly = 0;
-	int fields = 0, defmode = 0;
+	int fields = 0;
 	char **globs = NULL;
 	size_t nglobs = 0;
 	glob_t *fileglob = NULL;
@@ -661,7 +670,7 @@ static void process_line(const char *line)
 
 	uid_t uid = -1; uid_t defuid = 1;
 	gid_t gid = -1; gid_t defgid = 1;
-	mode_t mode = 0; int mask = 0;
+	mode_t mode = -1; mode_t defmode = 1; mode_t mask = 0;
 	dev_t dev = 0;
 	int mod = 0;
 
@@ -874,12 +883,12 @@ static void process_line(const char *line)
 								printf("DEBUG: chmod/r %s,%u", globs[i], mmode);
 
 							if (chmod(globs[i], mmode))
-								warn("chmod(%s,%s)", globs[i], modet);
+								warn("CHMOD: chmod(%s,%s)", globs[i], modet);
 						}
 						/* FIXME is the logic around -1 right here ? */
 						if (lchown(globs[i], defuid ? (uid_t)-1 : uid, 
 									defgid ? (gid_t)-1 : gid))
-							warn("lchown(%s,%s,%s)", globs[i], uidt, gidt);
+							warn("CHMOD: lchown(%s,%s,%s)", globs[i], uidt, gidt);
 					}
 				}
 				break;
@@ -1012,13 +1021,14 @@ mkdir_skip:
 					if (fd != -1)
 						close(fd);
 
+					/* mkpath performs chmod */
 					if (mkpath(path, (defmode ? DEF_FOLD : mode)) == -1)
-						warn("mkpathr(%s)", path);
-					else if (chown(path, uid, gid))
-						warn("chown(%s)", path);
+						warn("MKDIR: mkpath(%s)", path);
+					if (lchown(path, uid, gid))
+						warn("MKDIR: lchown(%s,%d,%d)", path, uid, gid);
 
 					if (debug)
-						printf("DEBUG: mkdir/r: %s\n", path);
+						printf("DEBUG: mkdir/r: %s:%d.%d:0%o\n", path, uid, gid, (defmode ? DEF_FOLD : mode));
 				}
 
 				break;
