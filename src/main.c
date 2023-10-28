@@ -25,29 +25,34 @@
 #include "config.h"
 #include "util.h"
 
-#define	CREAT_FILE	0x00
-#define TRUNC_FILE	0x01
-#define WRITE_ARG	0x02
-#define MKDIR		0x04
-#define MKDIR_RMF	0x05
-#define CREATE_SVOL	0x06
-#define CREATE_PIPE	0x08
-#define CREATE_SYM	0x0A
-#define	CREATE_CHAR	0x0C
-#define CREATE_BLK	0x0E
-#define	COPY		0x10
-#define	IGN			0x12
-#define	IGNR		0x13
-#define	RM			0x14
-#define	RMRF		0x15
-#define	CHMOD		0x16
-#define	CHMODR		0x17
-#define	CHATTR		0x18
-#define	CHATTRR		0x19
-#define	ACL			0x20
-#define	ACLR		0x21
-
-#define MAX_TYPE	0x21
+typedef enum { 
+	CREAT_FILE,
+	TRUNC_FILE,
+	WRITE_ARG,
+	MKDIR,
+	MKDIR_RMF,
+	CREATE_SVOL,
+	CREATE_SVOL2,
+	CREATE_PIPE,
+	CREATE_SYM,
+	CREATE_CHAR,
+	CREATE_BLK,
+	COPY,
+	IGN,
+	IGNR,
+	RM,
+	RMRF,
+	CHMOD,
+	CHMODR,
+	CHATTR,
+	CHATTRR,
+	ACL,
+	ACLR,
+	ADJUST,
+	CREATE_SVOL3,
+	LINUXATTR,
+	LINUXATTRR 
+} actions_t;
 
 #define MAX(a, b) (a < b ? b : a)
 
@@ -61,11 +66,15 @@
 #define MOD_SERVICE_CRED (1<<4)
 #define MOD_PLUS         (1<<5)
 
+/* long_opt values */
 static int do_create=0, do_clean=0, do_remove=0, do_boot=0;
 static int do_help=0, do_version=0; 
-static char *prefix = NULL, *exclude = NULL, *root = NULL;
+
+static char *opt_prefix = NULL, *opt_exclude = NULL, *opt_root = NULL;
 static char **config_files = NULL;
 static int num_config_files = 0;
+
+/* cache responses to varies system lookups in these */
 static char *hostname = NULL;
 static char *machineid = NULL;
 static char *kernelrel = NULL;
@@ -77,32 +86,29 @@ typedef struct ignent {
 } ignent_t;
 
 static ignent_t *ignores = NULL;
-int ignores_size = 0;
+static int ignores_size = 0;
 
 static void show_version(void)
 {
 	printf("tmpfilesd %s\n", VERSION);
-	exit(EXIT_SUCCESS);
 }
 
 static void show_help(void)
 {
 	printf(
-	"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
-	"Manage tmpfiles entries\n\n"
-	"  -h, --help                 show help\n"
-	"      --version              show version number\n"
-	"      --create               create or write to files\n"
-	"      --clean                clean up files or folders\n"
-	"      --remove               remove directories or filse\n"
-	"      --boot                 also execute lines with a !\n"
-	"      --prefix=PATH          only apply rules with a matching path\n"
-	"      --exclude-prefix=PATH  ignores rules with paths that match\n"
-	"      --root=ROOT            all paths including config will be prefixed\n"
-	"\n"
-	);
-
-	exit(EXIT_SUCCESS);
+			"Usage: tmpfilesd [OPTIONS]... [CONFIGURATION FILE]...\n"
+			"Manage tmpfiles entries\n\n"
+			"  -h, --help                 show help\n"
+			"      --version              show version number\n"
+			"      --create               create or write to files\n"
+			"      --clean                clean up files or folders\n"
+			"      --remove               remove directories or filse\n"
+			"      --boot                 also execute lines with a !\n"
+			"      --prefix=PATH          only apply rules with a matching path\n"
+			"      --exclude-prefix=PATH  ignores rules with paths that match\n"
+			"      --root=ROOT            all paths including config will be prefixed\n"
+			"\n"
+		  );
 }
 
 __attribute__((nonnull))
@@ -165,7 +171,7 @@ static uid_t vet_uid(const char **t, uid_t *defuid)
 __attribute__((nonnull))
 static gid_t vet_gid(const char **t, gid_t *defgid)
 {
-	if (/*!t ||*/ !*t || **t == '-') {
+	if (!*t || **t == '-') {
 		*defgid = 1;
 		return 0;
 	}
@@ -286,7 +292,7 @@ static const char *getmachineid(void)
 __attribute__((nonnull))
 static int vet_mode(const char **t, int *mask, int *defmode)
 {
-	if (/*!t ||*/ !*t || **t == '-') {
+	if (!*t || **t == '-') {
 		*defmode = 1;
 		return -1;
 	}
@@ -312,23 +318,27 @@ static int vet_mode(const char **t, int *mask, int *defmode)
 	return strtol(mod, NULL, 8);
 }
 
-#define LEN 1024
+/* TODO stop doing free(path) as pointer may be reused by callers */
 __attribute__((nonnull))
 static char *expand_path(char *path)
 {
-	//if (!path)
-	//	return NULL;
+	const int buf_len = 1024;
 
-	char *buf = calloc(1, LEN+1);
+	char *buf;
 	char *ptr = path;
 	const char *cpy;
 	char tmp;
 	int spos = 0, dpos = 0;
 
-	if (!buf)
-		err(1, "malloc");
+	if (!*path)
+		return path;
 
-	while((tmp = ptr[spos]) && dpos < LEN)
+	if ((buf = calloc(1, buf_len)) == NULL)
+		err(EXIT_FAILURE, "expand_path: calloc");
+
+	ptr = path;
+
+	while((tmp = ptr[spos]) && dpos < buf_len)
 	{
 		if (tmp != '%') {
 			buf[dpos++] = ptr[spos++];
@@ -336,7 +346,7 @@ static char *expand_path(char *path)
 		}
 
 		tmp = ptr[++spos];
-		if (dpos >= LEN || !tmp) 
+		if (dpos >= buf_len || !tmp) 
 			continue;
 
 		switch (tmp)
@@ -345,27 +355,31 @@ static char *expand_path(char *path)
 				buf[dpos++] = ptr[spos];
 				break;
 			case 'b':
-				if ( !(cpy = getbootid()) ) continue;
-				strncpy(buf+dpos, cpy, LEN-dpos);
-				dpos += strlen(cpy);
+				if ( !(cpy = getbootid()) ) 
+					continue;
+				strncpy(buf + dpos, cpy, buf_len - dpos);
+				dpos += strlen(cpy); 
 				break;
 			case 'm':
-				if ( !(cpy = getmachineid()) ) continue;
-				strncpy(buf+dpos, cpy, LEN-dpos);
+				if ( !(cpy = getmachineid()) ) 
+					continue;
+				strncpy(buf + dpos, cpy, buf_len - dpos);
 				dpos += strlen(cpy);
 				break;
 			case 'H':
-				if ( !(cpy = gethost()) ) continue;
-				strncpy(buf+dpos, cpy, LEN-dpos);
+				if ( !(cpy = gethost()) ) 
+					continue;
+				strncpy(buf + dpos, cpy, buf_len - dpos);
 				dpos += strlen(cpy);
 				break;
 			case 'v':
-				if ( !(cpy = getkernelrelease()) ) continue;
-				strncpy(buf+dpos, cpy, LEN-dpos);
+				if ( !(cpy = getkernelrelease()) ) 
+					continue;
+				strncpy(buf + dpos, cpy, buf_len - dpos);
 				dpos += strlen(cpy);
 				break;
 			default:
-				warnx("Unhandled expansion %c\n", tmp);
+				warnx("Unhandled expansion <%c>\n", isprint(tmp) ? tmp : '?');
 				break;
 		}
 
@@ -375,7 +389,6 @@ static char *expand_path(char *path)
 	free(path);
 	return buf;
 }
-#undef LEN
 
 /*
  * %m - Machine ID (machine-id(5))
@@ -406,8 +419,10 @@ static char *vet_path(char *path)
 __attribute__((nonnull))
 static struct timeval *vet_age(const char **t, int *subonly)
 {
-	if (/*!t ||*/ !*t || **t == '-')
+	if (!*t || **t == '-') {
+		errno = EINVAL;
 		return NULL;
+	}
 
 	uint64_t val;
 	int read, ret;
@@ -493,7 +508,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 	return r;
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull,warn_unused_result))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
 {
 	if (check_ignores)
@@ -504,7 +519,7 @@ static int unlink_wrapper(const char *pathname, bool check_ignores)
 	return unlink(pathname);
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull,warn_unused_result))
 static int rmifold(const char *path, const struct timeval *tv, bool check_ignores)
 {
 	struct stat sb;
@@ -546,7 +561,7 @@ static int rmifold(const char *path, const struct timeval *tv, bool check_ignore
 __attribute__((nonnull(1)))
 static int rmrf(const char *path, const struct timeval *tv, bool check_ignores)
 {
-	if (/*!path ||*/ !strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
+	if (!strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -613,13 +628,14 @@ static void process_line(const char *line)
 	char *modet = NULL, *dest = NULL;
 	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
 	char type;
-	int boot_only = 0, act = -1, subonly = 0;
+	int boot_only = 0, subonly = 0;
 	int fields = 0, defmode = 0;
 	char **globs = NULL;
 	size_t nglobs = 0;
 	glob_t *fileglob = NULL;
 	int fd = -1;
 	int ret;
+	actions_t act;
 
 	uid_t uid = 0; uid_t defuid = 0;
 	gid_t gid = 0; gid_t defgid = 0;
@@ -633,52 +649,57 @@ static void process_line(const char *line)
 			"%ms %ms %ms %ms %ms %ms %m[^\n]s",
 			&rawtype, &tmppath, &modet, &uidt, &gidt, &aget, &arg);
 
-	if ( prefix && strncmp(prefix, tmppath, strlen(prefix)) )
-		goto cleanup;
-
-	if ( exclude && !strncmp(exclude, tmppath, strlen(exclude)) )
-		goto cleanup;
-
 	if ( fields < 2 ) {
 		warnx("bad line: %s\n", line);
 		goto cleanup;
-		return;
-	} else if ( (mod = validate_type(rawtype, &type)) == -1 ) {
+	} 
+
+	if ( opt_prefix && strncmp(opt_prefix, tmppath, strlen(opt_prefix)) )
+		goto cleanup;
+
+	if ( opt_exclude && !strncmp(opt_exclude, tmppath, strlen(opt_exclude)) )
+		goto cleanup;
+
+	if ( (mod = validate_type(rawtype, &type)) == -1 ) {
 		warnx("bad type: %s\n", line);
 		goto cleanup;
-		return;
-	} else {
-		switch(type)
-		{
-			case 'f':	act = CREAT_FILE;	break;
-			case 'F':	act = TRUNC_FILE;	break;
-			case 'w':	act = WRITE_ARG;	break;
-			case 'd':	act = MKDIR;		break;
-			case 'D':	act = MKDIR_RMF;	break;
-			case 'v':	act = CREATE_SVOL;	break;
-			case 'p':	act = CREATE_PIPE;	break;
-			case 'L':	act = CREATE_SYM;	break;
-			case 'c':	act = CREATE_CHAR;	break;
-			case 'b':	act = CREATE_BLK;	break;
-			case 'C':	act = COPY;			break;
-			case 'x':	act = IGNR;			break;
-			case 'X':	act = IGN;			break;
-			case 'r':	act = RM;			break;
-			case 'R':	act = RMRF;			break;
-			case 'z':	act = CHMOD;		break;
-			case 'Z':	act = CHMODR;		break;
-			case 't':	act = CHATTR;		break;
-			case 'T':	act = CHATTRR;		break;
-			case 'a':	act = ACL;			break;
-			case 'A':	act = ACLR;			break;
-			default:
-						warnx("unknown type: %s\n", line);
-						goto cleanup;
-						return;
-		}
+	} 
+
+	switch(type)
+	{
+		case 'f':	act = CREAT_FILE;	break;
+		case 'F':	act = TRUNC_FILE;	break;
+		case 'w':	act = WRITE_ARG;	break;
+		case 'd':	act = MKDIR;		break;
+		case 'D':	act = MKDIR_RMF;	break;
+		case 'e':   act = ADJUST;       break;
+		case 'v':	act = CREATE_SVOL;	break;
+		case 'q':	act = CREATE_SVOL2;	break;
+		case 'Q':	act = CREATE_SVOL3;	break;
+		case 'p':	act = CREATE_PIPE;	break;
+		case 'L':	act = CREATE_SYM;	break;
+		case 'c':	act = CREATE_CHAR;	break;
+		case 'b':	act = CREATE_BLK;	break;
+		case 'C':	act = COPY;			break;
+		case 'x':	act = IGNR;			break;
+		case 'X':	act = IGN;			break;
+		case 'r':	act = RM;			break;
+		case 'R':	act = RMRF;			break;
+		case 'z':	act = CHMOD;		break;
+		case 'Z':	act = CHMODR;		break;
+		case 't':	act = CHATTR;		break;
+		case 'T':	act = CHATTRR;		break;
+		case 'h':   act = LINUXATTR;    break;
+		case 'H':   act = LINUXATTRR;   break;
+		case 'a':	act = ACL;			break;
+		case 'A':	act = ACLR;			break;
+
+		default:
+			warnx("unknown type: <%s>", line);
+			goto cleanup;
 	}
 
-	path = pathcat(root, tmppath);
+	path = pathcat(opt_root, tmppath);
 	free(tmppath);
 
 	if (uidt) uid = vet_uid((const char **)&uidt, &defuid);
@@ -705,9 +726,9 @@ static void process_line(const char *line)
 			 */
 			case WRITE_ARG:
 				glob_file(path, &globs, &nglobs, &fileglob);
-				if (do_create || do_clean)
+				if (do_create || (do_clean && age))
 				{
-					dest = pathcat(root, arg);
+					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
 						printf("[%u] write %s=%s %s%s", i, path, dest, 
@@ -720,8 +741,8 @@ static void process_line(const char *line)
 				}
 				break;
 
-				/* r - Remove a file or directory if it exists (empty only)
-				 * R - Recursively remove a path and all its subdirectories
+				/* r - Remove a file or directory if it exists (empty only) [remove]
+				 * R - Recursively remove a path and all its subdirectories [remove]
 				 *
 				 * Mode: ignored
 				 * UID, GID: ignored
@@ -731,7 +752,7 @@ static void process_line(const char *line)
 			case RMRF:
 				if (!do_remove) 
 					break;
-				
+
 				glob_file(path, &globs, &nglobs, &fileglob);
 
 				for (i = 0; i < (int)nglobs; i++)
@@ -740,7 +761,8 @@ static void process_line(const char *line)
 						if (rmrf(globs[i], NULL, false))
 							warn("rmrf(%s)",globs[i]);
 					} else
-						unlink_wrapper(globs[i], false);
+						if (unlink_wrapper(globs[i], false))
+							warn("RM: unlink(%s):", globs[i]);
 
 				}
 				break;
@@ -825,7 +847,7 @@ static void process_line(const char *line)
 			case CHATTRR:
 				glob_file(path, &globs, &nglobs, &fileglob);
 				if (do_create) {
-					dest = pathcat(root, arg);
+					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
 						warnx("[%u] path=%s dest=%s\n", i, globs[i], dest);
@@ -846,7 +868,7 @@ static void process_line(const char *line)
 			case ACLR:
 				glob_file(path, &globs, &nglobs, &fileglob);
 				if (do_create) {
-					dest = pathcat(root, arg);
+					dest = pathcat(opt_root, arg);
 					for (i=0; i<(int)nglobs; i++) {
 						/* TODO */
 						printf("[%u] path=%s dest=%s\n", i, globs[i], dest);
@@ -857,12 +879,11 @@ static void process_line(const char *line)
 				/* v - create subvolume, or behave as d if not supported 
 				*/
 			case CREATE_SVOL:
-				//				errno = ENOSYS;
-				//				warn("subvol(%s)", path);
+				/* TODO */
 				break;
 
 				/* d - create a directory (if does not exist)
-				 * D - create a direcotry (delete contents if exists)
+				 * D - create a direcotry (delete contents if exists) [remove]
 				 */
 			case MKDIR:
 			case MKDIR_RMF:
@@ -884,8 +905,8 @@ static void process_line(const char *line)
 							{
 								if (do_clean && age)
 									rmrf(buf, age, do_clean);
-								else
-									unlink_wrapper(buf, do_clean);
+								else if (unlink_wrapper(buf, do_clean))
+									warn("MKDIR: unlink(%s)", buf);
 								free(buf);
 							}
 
@@ -894,8 +915,8 @@ static void process_line(const char *line)
 					} else {
 						if (do_clean && age)
 							rmrf(path, age, do_clean);
-						else
-							unlink_wrapper(path, false); /* FIXME is false correct? */
+						else if (unlink_wrapper(path, false)) /* FIXME is false correct? */
+							warn("MKDIR: unlink(%s)", path);
 					}
 				}
 
@@ -908,6 +929,7 @@ static void process_line(const char *line)
 					   */
 					fd = open(path, O_DIRECTORY|O_RDONLY);
 					if (fd == -1 && errno != ENOENT) break;
+					else if (fd == -1 && errno == ENOENT) /* OK */ ;
 					else if (fd != -1 && !(act == MKDIR_RMF)) break;
 					else if (fd != -1 && rmrf(path, NULL, false))
 						warn("rmrf(%s)", path);
@@ -915,8 +937,7 @@ static void process_line(const char *line)
 					if (fd != -1)
 						close(fd);
 
-					fd = mkpath(path, (defmode ? DEF_FOLD : mode));
-					if (fd == -1)
+					if (mkpath(path, (defmode ? DEF_FOLD : mode)) == -1)
 						warn("mkpathr(%s)", path);
 					else if (chown(path, uid, gid))
 						warn("chown(%s)", path);
@@ -932,6 +953,10 @@ static void process_line(const char *line)
 				 */
 			case CREAT_FILE:
 			case TRUNC_FILE:
+				if (do_clean && age) {
+					/* TODO */
+				}
+
 				if (do_create) {
 					/* TODO this should skip if exists */
 					fd = open(path, 
@@ -956,7 +981,7 @@ static void process_line(const char *line)
 				 */
 			case COPY:
 				if (do_create) {
-					dest = pathcat(root, arg);
+					dest = pathcat(opt_root, arg);
 					/* TODO */
 					printf("src=%s\n", dest);
 				}
@@ -968,6 +993,10 @@ static void process_line(const char *line)
 				 * Argument: ignored
 				 */
 			case CREATE_PIPE:
+				if (do_clean && age) {
+					/* TODO */
+				}
+
 				if (do_create) {
 					fd = open(path, O_RDONLY);
 					if (fd == -1 && errno != ENOENT) 
@@ -995,9 +1024,13 @@ static void process_line(const char *line)
 				 * Argument: if empty, symlink to /usr/share/factory/$NAME
 				 */
 			case CREATE_SYM: // FIXME handle NULL dest => /usr/share/factory
+				if (do_clean && age) {
+					/* TODO */
+				}
+
 				if (do_create) {
 					if (strncmp("../", arg, 3) )
-						dest = pathcat(root, arg);
+						dest = pathcat(opt_root, arg);
 					else
 						dest = strdup(arg);
 
@@ -1047,6 +1080,10 @@ static void process_line(const char *line)
 				 * Argument: ignored
 				 */
 			case CREATE_CHAR:
+				if (do_clean && age) {
+					/* TODO */
+				}
+
 				if (do_create) {
 					struct stat sb;
 					ret = stat(path, &sb);
@@ -1073,14 +1110,19 @@ static void process_line(const char *line)
 				}
 				break;
 
-				/* b - Create a pipe (FIFO) if it does not exist
-				 * b+ - Remove and create a pipe (FIFO)
+				/* b - Create a block device node if it does not exist
+				 * b+ - Remove and create
 				 *
 				 * Argument: ignored
 				 */
 			case CREATE_BLK:
+				if (do_clean && age) {
+					/* TODO */
+				}
+
 				if (do_create) {
-					dest = pathcat(root, arg);
+					/* TODO */
+					dest = pathcat(opt_root, arg);
 				}
 				break;
 			default:
@@ -1231,13 +1273,13 @@ int main(int argc, char *argv[])
 		switch (c)
 		{
 			case 'p':
-				prefix = strdup(optarg);
+				opt_prefix = strdup(optarg);
 				break;
 			case 'e':
-				exclude = strdup(optarg);
+				opt_exclude = strdup(optarg);
 				break;
 			case 'r':
-				root = strdup(optarg);
+				opt_root = strdup(optarg);
 				break;
 			case 'h':
 				do_help = 1;
@@ -1253,27 +1295,30 @@ int main(int argc, char *argv[])
 	}
 
 	if (optind < argc) {
-		config_files = (char **)calloc(argc - optind, sizeof(char *));
-
-		if (!config_files)
-			err(1, "calloc");
+		if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
+			err(EXIT_FAILURE, "main: calloc");
 
 		while (optind < argc)
 			config_files[num_config_files++] = strdup(argv[optind++]);
 	}
 
-	if (fail)
-		exit(EXIT_FAILURE);
-
-	if (do_help)
+	if (fail) {
 		show_help();
+		exit(EXIT_FAILURE);
+	}
 
-	if (do_version)
+	if (do_help) {
+		show_help();
+		exit(EXIT_SUCCESS);
+	}
+
+	if (do_version) {
 		show_version();
+		exit(EXIT_SUCCESS);
+	}
 
-	if (!root)
-		root = "";
-
+	if (!opt_root)
+		opt_root = "";
 
 #ifdef DEBUG
 	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
@@ -1282,12 +1327,13 @@ int main(int argc, char *argv[])
 			root);
 #endif
 
-	process_folder(pathcat(root, "/etc/tmpfiles.d"));
-	process_folder(pathcat(root, "/run/tmpfiles.d"));
-	process_folder(pathcat(root, "/usr/lib/tmpfiles.d"));
+	/* TODO move these to constants somewhere e.g. config.h */
+	process_folder(pathcat(opt_root, "/etc/tmpfiles.d"));
+	process_folder(pathcat(opt_root, "/run/tmpfiles.d"));
+	process_folder(pathcat(opt_root, "/usr/lib/tmpfiles.d"));
 
 	for (int i = 0; i < num_config_files; i++)
-		process_file(pathcat(root, config_files[i]), NULL);
+		process_file(pathcat(opt_root, config_files[i]), NULL);
 
 	exit(EXIT_SUCCESS);
 }
