@@ -25,9 +25,9 @@
 #include "config.h"
 #include "util.h"
 
-typedef enum { 
+typedef enum {
+    ACT_NULL = 0,
 	CREAT_FILE,
-	TRUNC_FILE,
 	WRITE_ARG,
 	MKDIR,
 	MKDIR_RMF,
@@ -46,13 +46,72 @@ typedef enum {
 	CHMODR,
 	CHATTR,
 	CHATTRR,
-	ACL,
-	ACLR,
+	CHACL,
+	CHACLR,
 	ADJUST,
 	CREATE_SVOL3,
-	LINUXATTR,
-	LINUXATTRR 
+	CHXATTR,
+	CHXATTRR 
 } actions_t;
+
+typedef enum {
+	CFG_MODE   = (1<<0),
+	CFG_UID    = (1<<1),
+	CFG_GID    = (1<<2),
+	CFG_STAT   = CFG_MODE|CFG_UID|CFG_GID,
+	CFG_AGE    = (1<<3),
+	CFG_GLOB   = (1<<4),
+	CFG_FOLLOW = (1<<5),
+    CFG_PLUS   = (1<<6),
+} cfg_options_t;
+
+typedef enum {
+		ARG_CONTENT        = 0,
+		ARG_SYMLINK_TARGET = 1,
+		ARG_NODE           = 2,
+		ARG_SOURCE         = 3,
+		ARG_XATTR          = 4,
+		ARG_ATTR           = 5,
+		ARG_ACL            = 6
+} cfg_arg_type_t;
+
+__attribute__((unused))
+static const struct config_element {
+	const actions_t act;
+	const int options;
+    const cfg_arg_type_t arg_type;
+} configuration[] = {
+    [0x00] = { 0, 0, 0 },
+
+	['f']  = { CREAT_FILE   , CFG_STAT|CFG_PLUS            , ARG_CONTENT        } , 
+	['w']  = { WRITE_ARG    , CFG_STAT|CFG_FOLLOW|CFG_PLUS , ARG_CONTENT        } , 
+	['d']  = { MKDIR        , CFG_STAT|CFG_AGE             , 0                  } , 
+	['D']  = { MKDIR_RMF    , CFG_STAT|CFG_AGE             , 0                  } , 
+	['e']  = { ADJUST       , CFG_STAT|CFG_AGE             , 0                  } , 
+	['v']  = { CREATE_SVOL  , CFG_STAT|CFG_AGE             , 0                  } , 
+	['q']  = { CREATE_SVOL2 , CFG_STAT|CFG_AGE             , 0                  } , 
+	['Q']  = { CREATE_SVOL3 , CFG_STAT|CFG_AGE             , 0                  } , 
+	['p']  = { CREATE_PIPE  , CFG_STAT|CFG_PLUS            , 0                  } , 
+	['L']  = { CREATE_SYM   , CFG_PLUS                     , ARG_SYMLINK_TARGET } , 
+	['c']  = { CREATE_CHAR  , CFG_STAT|CFG_PLUS            , ARG_NODE           } , 
+	['b']  = { CREATE_BLK   , CFG_STAT|CFG_PLUS            , ARG_NODE           } , 
+	['C']  = { COPY         , CFG_AGE                      , ARG_SOURCE         } , 
+	['x']  = { IGN          , CFG_AGE                      , 0                  } , 
+	['X']  = { IGNR         , CFG_AGE                      , 0                  } , 
+	['r']  = { RM           , 0                            , 0                  } , 
+	['R']  = { RMRF         , 0                            , 0                  } , 
+	['z']  = { CHMOD        , CFG_STAT                     , 0                  } , 
+	['Z']  = { CHMODR       , CFG_STAT                     , 0                  } , 
+	['t']  = { CHXATTR      , CFG_STAT                     , ARG_XATTR          } , 
+	['T']  = { CHXATTRR     , CFG_STAT                     , ARG_XATTR          } , 
+	['h']  = { CHXATTR      , CFG_STAT                     , ARG_ATTR           } , 
+	['H']  = { CHXATTRR     , CFG_STAT                     , ARG_ATTR           } , 
+	['a']  = { CHACL        , CFG_STAT|CFG_PLUS            , ARG_ACL            } , 
+	['A']  = { CHACLR       , CFG_STAT|CFG_PLUS            , ARG_ACL            } , 
+
+    [0xff] = { 0, 0, 0 },
+};
+
 
 #define MAX(a, b) (a < b ? b : a)
 
@@ -313,7 +372,6 @@ static mode_t vet_mode(const char **t, mode_t *mask, mode_t *defmode)
 		return -1;
 	}
 
-	// FIXME this is wrong :-(
 	char *endptr;
 	long ret;
 
@@ -655,715 +713,782 @@ static int rm_rf(const char *path, const struct timeval *tv,
 __attribute__((nonnull))
 static void process_line(const char *line)
 {
-	char *rawtype = NULL, *tmppath = NULL, *path = NULL; 
-	char *modet = NULL, *dest = NULL;
-	char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
-	char type;
-	int boot_only = 0, subonly = 0;
-	int fields = 0;
-	char **globs = NULL;
-	size_t nglobs = 0;
-	glob_t *fileglob = NULL;
-	int fd = -1;
-	int ret;
-	actions_t act;
+    char *rawtype = NULL, *rawpath = NULL, *path = NULL; 
+    char *modet = NULL, *dest = NULL, *src = NULL;
+    char *uidt = NULL, *gidt = NULL, *aget = NULL, *arg = NULL;
+    char type;
+    int subonly = 0;
+    int fields = 0;
+    char **globs = NULL;
+    size_t nglobs = 0;
+    glob_t *fileglob = NULL;
+    int fd = -1;
+    int ret;
+    actions_t act;
 
-	uid_t uid = -1; uid_t defuid = 1;
-	gid_t gid = -1; gid_t defgid = 1;
-	mode_t mode = -1; mode_t defmode = 1; mode_t mask = 0;
-	dev_t dev = 0;
-	int mod = 0;
+    uid_t uid = -1; uid_t defuid = 1;
+    gid_t gid = -1; gid_t defgid = 1;
+    mode_t mode = -1; mode_t defmode = 1; mode_t mask = 0;
+    dev_t dev = 0;
+    int mod = 0;
 
-	struct timeval *age = NULL;
+    struct timeval *age = NULL;
+    const struct config_element *cfg_elem;
 
-	fields = sscanf(line, 
-			"%ms %ms %ms %ms %ms %ms %m[^\n]s",
-			&rawtype, &tmppath, &modet, &uidt, &gidt, &aget, &arg);
+    fields = sscanf(line, 
+            "%ms %ms %ms %ms %ms %ms %m[^\n]s",
+            &rawtype, &rawpath, &modet, &uidt, &gidt, &aget, &arg);
 
-	if ( fields < 2 ) {
-		warnx("bad line: %s\n", line);
-		goto cleanup;
-	} 
+    if ( fields < 2 ) {
+        warnx("bad line: %s\n", line);
+        goto cleanup;
+    } 
 
-	if ( opt_prefix && strncmp(opt_prefix, tmppath, strlen(opt_prefix)) )
-		goto cleanup;
+    if ( opt_prefix && strncmp(opt_prefix, rawpath, strlen(opt_prefix)) )
+        goto cleanup;
 
-	if ( opt_exclude && !strncmp(opt_exclude, tmppath, strlen(opt_exclude)) )
-		goto cleanup;
+    if ( opt_exclude && !strncmp(opt_exclude, rawpath, strlen(opt_exclude)) )
+        goto cleanup;
 
-	if ( (mod = validate_type(rawtype, &type)) == -1 ) {
-		warnx("process_line: bad type: %s\n", line);
-		goto cleanup;
-	} 
+    if ( (mod = validate_type(rawtype, &type)) == -1 ) {
+        warnx("process_line: bad type: %s", line);
+        goto cleanup;
+    } 
 
-	switch(type)
-	{
-		case 'f':	act = CREAT_FILE;	break;
-		case 'F':	act = TRUNC_FILE;	break;
-		case 'w':	act = WRITE_ARG;	break;
-		case 'd':	act = MKDIR;		break;
-		case 'D':	act = MKDIR_RMF;	break;
-		case 'e':   act = ADJUST;       break;
-		case 'v':	act = CREATE_SVOL;	break;
-		case 'q':	act = CREATE_SVOL2;	break;
-		case 'Q':	act = CREATE_SVOL3;	break;
-		case 'p':	act = CREATE_PIPE;	break;
-		case 'L':	act = CREATE_SYM;	break;
-		case 'c':	act = CREATE_CHAR;	break;
-		case 'b':	act = CREATE_BLK;	break;
-		case 'C':	act = COPY;			break;
-		case 'x':	act = IGNR;			break;
-		case 'X':	act = IGN;			break;
-		case 'r':	act = RM;			break;
-		case 'R':	act = RMRF;			break;
-		case 'z':	act = CHMOD;		break;
-		case 'Z':	act = CHMODR;		break;
-		case 't':	act = CHATTR;		break;
-		case 'T':	act = CHATTRR;		break;
-		case 'h':   act = LINUXATTR;    break;
-		case 'H':   act = LINUXATTRR;   break;
-		case 'a':	act = ACL;			break;
-		case 'A':	act = ACLR;			break;
+    if ( configuration[(uint8_t)type].act == ACT_NULL ) {
+        warnx("process_line: invalid type: %s", line);
+        goto cleanup;
+    }
 
-		default:
-			warnx("unknown type: <%s>", line);
-			goto cleanup;
-	}
+    cfg_elem = &configuration[(uint8_t)type];
+    act = cfg_elem->act;
 
-	path = pathcat(opt_root, tmppath);
-	tmppath = NULL;
-	free(tmppath);
+    path = pathcat(opt_root, rawpath);
 
-	if (uidt) uid   = vet_uid((const char **)&uidt, &defuid);
-	if (gidt) gid   = vet_gid((const char **)&gidt, &defgid);
-	if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode);
-	// FIXME handle '~'
-	if (aget) age   = vet_age((const char **)&aget, &subonly);
-	if (path) path  = vet_path(path);
+    /* preserve these for COPY */
 
-	if (path == NULL)
-		return;
+    /*
+       tmppath = NULL;
+       free(tmppath);
+       */
 
-	int i;
+    if (uidt) uid   = vet_uid((const char **)&uidt, &defuid);
+    if (gidt) gid   = vet_gid((const char **)&gidt, &defgid);
+    if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode);
+    // FIXME handle '~'
+    if (aget) age   = vet_age((const char **)&aget, &subonly);
+    if (path) path  = vet_path(path);
 
-	if ( (do_boot && boot_only) || !boot_only ) {
+    if (path == NULL)
+        goto cleanup;
 
-		switch(act)
-		{
+    int i;
 
-			/* w - Write the argument parameter to a file
-			 *
-			 * Argument:
-			 * For f, F, and w may be used to specify a short string
-			 * that is written to the file, suffixed by a newline
-			 */
-			case WRITE_ARG:
-				if (glob_file(path, &globs, &nglobs, &fileglob)) {
-					warn("WRITE_ARG: glob_file");
-					break;
-				}
-				if (do_create || (do_clean && age))
-				{
-					dest = pathcat(opt_root, arg);
-					for (i=0; i<(int)nglobs; i++) {
-						/* TODO */
-						if (debug) {
-							printf("DEBUG: write %s=%s %s%s", path, dest, 
-									do_clean ? "clean " : "",
-									do_create ? "create " : "");
+    //if (debug)
+      //  printf("DEBUG: processing '%c' do_boot=%d MOD_BOOT_ONLY=%d\n", 
+        //        type, do_boot, mod & MOD_BOOT_ONLY);
 
-							if (do_clean && age)
-								printf("age=%lu", age->tv_sec);
-							puts("\n");
-						}
-					}
-				}
-				break;
+    /* skip if not applicable due to boot mode & settings */
+    if ( (do_boot && !(mod & MOD_BOOT_ONLY)) || (!do_boot && (mod & MOD_BOOT_ONLY)) )
+        goto cleanup;
 
-				/* r - Remove a file or directory if it exists (empty only) [remove]
-				 * R - Recursively remove a path and all its subdirectories [remove]
-				 *
-				 * Mode: ignored
-				 * UID, GID: ignored
-				 * Age: ignored
-				 */
-			case RM:
-			case RMRF:
-				if (!do_remove) 
-					break;
+    switch(act)
+    {
 
-				if (glob_file(path, &globs, &nglobs, &fileglob)) {
-					if (errno != ENOENT)
-						warn("RM: glob_file");
-					break;
-				}
+        /* w - Write the argument parameter to a file
+         *
+         * Argument: Content to be written including C-style backslash escapes
+         * Path: glob
+         * Symlinks: followed
+         *
+         * Write to existing file, w+ append to existing file.
+         */
+        case WRITE_ARG:
+            if (glob_file(path, &globs, &nglobs, &fileglob)) {
+                warn("WRITE_ARG: glob_file");
+                break;
+            }
 
-				for (i = 0; i < (int)nglobs; i++)
-				{
-					if (act == RMRF) {
-						if (rm_rf(globs[i], NULL, false, false))
-							warn("RMRF: rmrf(%s)",globs[i]);
-					} else
-						if (unlink_wrapper(globs[i], false) && errno != ENOENT)
-							warn("RM: unlink(%s):", globs[i]);
+            if (do_create || (do_clean && age) || do_remove)
+            {
+                for (i=0; i<(int)nglobs; i++) {
+                    /* TODO */
+                    if (debug) {
+                        printf("DEBUG: write <%s> = <%s>", path, arg);
 
-				}
-				break;
+                        if (do_clean && age)
+                            printf(" age=%lu", age->tv_sec);
 
-				/* x - Ignore a path during cleaning (plus contents)
-				 * X - Ignore a path during cleaning (ignores contents)
-				 *
-				 * Mode: ignored
-				 * UID, GID: ignored
-				 */
-			case IGN:
-			case IGNR:
-				if (glob_file(path, &globs, &nglobs, &fileglob)) {
-					if (errno != ENOENT)
-						warn("IGN: glob_file");
-					break;
-				}
+                        printf("\n");
+                    }
+                }
+            }
+            break;
 
-				for (i=0; i<(int)nglobs; i++)
-				{
-					ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
-					if (!ignores) {
-						warn("realloc");
-						break;
-					}
+            /* r - Remove a file or directory if it exists (empty only) [remove]
+             * R - Recursively remove a path and all its subdirectories [remove]
+             *
+             * Mode: ignored
+             * UID, GID: ignored
+             * Age: ignored
+             */
+        case RM:
+        case RMRF:
+            if (!do_remove) 
+                break;
 
-					strncpy(ignores[ignores_size].path, globs[i], PATH_MAX - 1);
-					ignores[ignores_size].contents = (act == IGN) ? true : false;
-					ignores[ignores_size].length   = strlen(ignores[ignores_size].path);
-					ignores_size++;
+            if (glob_file(path, &globs, &nglobs, &fileglob)) {
+                if (errno != ENOENT)
+                    warn("RM: glob_file");
+                break;
+            }
 
-					if (debug)
-						printf("DEBUG: ignore/r %s\n", globs[i]);
-				}
-				break;
+            for (i = 0; i < (int)nglobs; i++)
+            {
+                if (act == RMRF) {
+                    if (rm_rf(globs[i], NULL, false, false))
+                        warn("RMRF: rmrf(%s)",globs[i]);
+                } else
+                    if (unlink_wrapper(globs[i], false) && errno != ENOENT)
+                        warn("RM: unlink(%s):", globs[i]);
 
-				/* z - Adjust the access mode, group and user, and restore the 
-				 *     SELinux security context (if it exists)
-				 * Z - As above, recursively.
-				 *
-				 * Mode: NULL/- means do not change
-				 * UID, GID: NULL/- means do not change
-				 */
-			case CHMOD:
-			case CHMODR:
-				if (glob_file(path, &globs, &nglobs, &fileglob) && errno) {
-					if (errno != ENOENT)
-						warn("CHMOD: glob_file");
-					break;
-				}
+            }
+            break;
 
-				struct stat sb;
+            /* x - Ignore a path during cleaning (plus contents)
+             * X - Ignore a path during cleaning (ignores contents)
+             *
+             * Mode: ignored
+             * UID, GID: ignored
+             */
+        case IGN:
+        case IGNR:
+            if (glob_file(path, &globs, &nglobs, &fileglob)) {
+                if (errno != ENOENT)
+                    warn("IGN: glob_file");
+                break;
+            }
 
-				if (do_create) {
-					mode_t mmode = mode;
+            for (i=0; i<(int)nglobs; i++)
+            {
+                ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
+                if (!ignores) {
+                    warn("realloc");
+                    break;
+                }
 
-					for (i=0; i<(int)nglobs; i++) {
+                strncpy(ignores[ignores_size].path, globs[i], PATH_MAX - 1);
+                ignores[ignores_size].contents = (act == IGN) ? true : false;
+                ignores[ignores_size].length   = strlen(ignores[ignores_size].path);
+                ignores_size++;
 
-						if (defmode) {
-							if (stat(globs[i], &sb) == -1)
-								warn("stat(%s)", globs[i]);
-							else {
-								if (S_ISDIR(sb.st_mode)) 
-									mmode = DEF_FOLD;
-								else
-									mmode = DEF_FILE;
-							}
-						} 
+                if (debug)
+                    printf("DEBUG: ignore/r %s\n", globs[i]);
+            }
+            break;
 
-						if (mask) {
-							errno = ENOSYS;
-							warn("chmod(%s,%s)", globs[i], modet);
-						} else {
-							if (debug)
-								printf("DEBUG: chmod/r %s,%u", globs[i], mmode);
+            /* z - Adjust the access mode, group and user, and restore the 
+             *     SELinux security context (if it exists)
+             * Z - As above, recursively.
+             *
+             * Mode: NULL/- means do not change
+             * UID, GID: NULL/- means do not change
+             */
+        case CHMOD:
+        case CHMODR:
+            if (glob_file(path, &globs, &nglobs, &fileglob) && errno) {
+                if (errno != ENOENT)
+                    warn("CHMOD: glob_file");
+                break;
+            }
 
-							if (chmod(globs[i], mmode))
-								warn("CHMOD: chmod(%s,%s)", globs[i], modet);
-						}
-						/* FIXME is the logic around -1 right here ? */
-						if (lchown(globs[i], defuid ? (uid_t)-1 : uid, 
-									defgid ? (gid_t)-1 : gid))
-							warn("CHMOD: lchown(%s,%s,%s)", globs[i], uidt, gidt);
-					}
-				}
-				break;
+            struct stat sb;
 
-				/* t - Set extended attributes
-				 * T - Set extended attributes, recursively
-				 *
-				 * Mode: ignored
-				 * UID, GID: ignored
-				 * Age: ignored
-				 */
-			case CHATTR:
-			case CHATTRR:
-				if (glob_file(path, &globs, &nglobs, &fileglob)) {
-					if (errno != ENOENT)
-						warn("CHATTR: glob_file");
-					break;
-				}
+            if (do_create) {
+                mode_t mmode = mode;
 
-				if (do_create) {
-					dest = pathcat(opt_root, arg);
-					for (i=0; i<(int)nglobs; i++) {
-						/* TODO */
-						if (debug)
-							printf("DEBUG: chattr/r path=%s dest=%s\n", globs[i], dest);
-					}
-				}
-				break;
+                for (i=0; i<(int)nglobs; i++) {
 
-				/* a/a+ - Set POSIX ACLs. If suffixed with +, specified entries 
-				 *        will be added to the existing set
-				 * A/A+ - as above, but recursive.
-				 *
-				 * Mode: ignored
-				 * UID, GID: ignored
-				 * Age: ignored
-				 */
-			case ACL:
-			case ACLR:
-				if (glob_file(path, &globs, &nglobs, &fileglob)) {
-					if (errno != ENOENT)
-						warn("ACL: glob_file");
-					break;
-				}
+                    if (defmode) {
+                        if (stat(globs[i], &sb) == -1)
+                            warn("stat(%s)", globs[i]);
+                        else {
+                            if (S_ISDIR(sb.st_mode)) 
+                                mmode = DEF_FOLD;
+                            else
+                                mmode = DEF_FILE;
+                        }
+                    } 
 
-				if (do_create) {
-					dest = pathcat(opt_root, arg);
-					for (i=0; i<(int)nglobs; i++) {
-						/* TODO */
-						if (debug)
-							printf("DEBUG: acl/r path=%s dest=%s\n", globs[i], dest);
-					}
-				}
-				break;
+                    if (mask) {
+                        errno = ENOSYS;
+                        warn("chmod(%s,%s)", globs[i], modet);
+                    } else {
+                        if (debug)
+                            printf("DEBUG: chmod/r %s,%u", globs[i], mmode);
 
-				/* v - create subvolume, or behave as d if not supported 
-				*/
-			case CREATE_SVOL:
-				/* TODO */
-				break;
+                        if (chmod(globs[i], mmode))
+                            warn("CHMOD: chmod(%s,%s)", globs[i], modet);
+                    }
+                    /* FIXME is the logic around -1 right here ? */
+                    if (lchown(globs[i], defuid ? (uid_t)-1 : uid, 
+                                defgid ? (gid_t)-1 : gid))
+                        warn("CHMOD: lchown(%s,%s,%s)", globs[i], uidt, gidt);
+                }
+            }
+            break;
 
-				/* d - create a directory (if does not exist)
-				 * D - create a direcotry (delete contents if exists) [remove]
-				 */
-			case MKDIR:
-			case MKDIR_RMF:
-				if ( (do_clean && age) || (do_remove && act == MKDIR_RMF) ) {
-					if (subonly) {
-						DIR *dirp = opendir(path);
-						struct dirent *dirent;
-						char *buf;
+            /* t - Set extended attributes
+             * T - Set extended attributes, recursively
+             *
+             * Mode: ignored
+             * UID, GID: ignored
+             * Age: ignored
+             */
+        case CHATTR:
+        case CHATTRR:
+            if (glob_file(path, &globs, &nglobs, &fileglob)) {
+                if (errno != ENOENT)
+                    warn("CHATTR: glob_file");
+                break;
+            }
 
-						if (!dirp)
-							goto mkdir_skip;
+            if (do_create) {
+                dest = pathcat(opt_root, arg);
+                for (i=0; i<(int)nglobs; i++) {
+                    /* TODO */
+                    if (debug)
+                        printf("DEBUG: chattr/r path=%s dest=%s\n", globs[i], dest);
+                }
+            }
+            break;
 
-						while ( (dirent = readdir(dirp)) != NULL )
-						{
-							if ( is_dot(dirent->d_name) )
-								continue;
+            /* a/a+ - Set POSIX ACLs. If suffixed with +, specified entries 
+             *        will be added to the existing set
+             * A/A+ - as above, but recursive.
+             *
+             * Mode: ignored
+             * UID, GID: ignored
+             * Age: ignored
+             */
+        case CHACL:
+        case CHACLR:
+            if (glob_file(path, &globs, &nglobs, &fileglob)) {
+                if (errno != ENOENT)
+                    warn("ACL: glob_file");
+                break;
+            }
 
-							if ( (buf = pathcat(path, dirent->d_name)) )
-							{
-								if (do_clean && age) {
-									if (rm_rf(buf, age, do_clean, true))
-										warn("MKDIR: rm_rf(%s)", buf);
-								} else if (unlink_wrapper(buf, do_clean) && errno != ENOENT)
-									warn("MKDIR: unlink(%s)", buf);
-								free(buf);
-							}
+            if (do_create) {
+                dest = pathcat(opt_root, arg);
+                for (i=0; i<(int)nglobs; i++) {
+                    /* TODO */
+                    if (debug)
+                        printf("DEBUG: acl/r path=%s dest=%s\n", globs[i], dest);
+                }
+            }
+            break;
 
-						}
+            /* v - create subvolume, or behave as d if not supported 
+            */
+        case CREATE_SVOL:
+            /* TODO */
+            break;
 
-					} else { /* !subonly */
-						if (do_clean && age) {
-							/* tmpfiles.d(5) is ambiguous if d/D follow symlinks */
-							if (rm_rf(path, age, do_clean, false)) 
-								warn("MKDIR: rm_rf(%s)", path);
-							else if (debug)
-								printf("DEBUG: CLEAN: mkdir/r: %s\n", path);
+            /* d - create a directory (if does not exist)
+             * D - create a direcotry (delete contents if exists) [remove]
+             */
+        case MKDIR:
+        case MKDIR_RMF:
+            if ( (do_clean && age) || (do_remove && act == MKDIR_RMF) ) {
+                if (subonly) {
+                    DIR *dirp = opendir(path);
+                    struct dirent *dirent;
+                    char *buf;
 
-						} else if (do_remove) {
-							if (unlink_wrapper(path, false) && errno != ENOENT) /* FIXME is false correct? */
-								warn("MKDIR: unlink(%s)", path);
-							else if (debug)
-								printf("DEBUG: REMOVE: mkdir/r: %s\n", path);
-						}
-					}
-				}
+                    if (!dirp)
+                        goto mkdir_skip;
+
+                    while ( (dirent = readdir(dirp)) != NULL )
+                    {
+                        if ( is_dot(dirent->d_name) )
+                            continue;
+
+                        if ( (buf = pathcat(path, dirent->d_name)) )
+                        {
+                            if (do_clean && age) {
+                                if (rm_rf(buf, age, do_clean, true))
+                                    warn("MKDIR: rm_rf(%s)", buf);
+                            } else if (unlink_wrapper(buf, do_clean) && errno != ENOENT)
+                                warn("MKDIR: unlink(%s)", buf);
+                            free(buf);
+                        }
+
+                    }
+
+                } else { /* !subonly */
+                    if (do_clean && age) {
+                        /* tmpfiles.d(5) is ambiguous if d/D follow symlinks */
+                        if (rm_rf(path, age, do_clean, false)) 
+                            warn("MKDIR: rm_rf(%s)", path);
+                        else if (debug)
+                            printf("DEBUG: CLEAN: mkdir/r: %s\n", path);
+
+                    } else if (do_remove) {
+                        if (unlink_wrapper(path, false) && errno != ENOENT) /* FIXME is false correct? */
+                            warn("MKDIR: unlink(%s)", path);
+                        else if (debug)
+                            printf("DEBUG: REMOVE: mkdir/r: %s\n", path);
+                    }
+                }
+            }
 mkdir_skip:
-				if (do_create) {
-					/*
-					   printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, 
-					   aget);
-					   printf("MKDIR %s [%d] %u %u %u\n", path, defmode, 
-					   (defmode ? DEF_FOLD : mode), uid, gid);
-					   */
-					fd = open(path, O_DIRECTORY|O_RDONLY);
+            if (do_create) {
+                /*
+                   printf("MKDIR %s %s %s %s %s\n", path, modet, uidt, gidt, 
+                   aget);
+                   printf("MKDIR %s [%d] %u %u %u\n", path, defmode, 
+                   (defmode ? DEF_FOLD : mode), uid, gid);
+                   */
+                fd = open(path, O_DIRECTORY|O_RDONLY);
 
-					if (fd == -1 && errno != ENOENT) 
-						break;
-					else if (fd == -1 && errno == ENOENT) {
-						/* OK */ 
-					} else if (fd != -1 && !(act == MKDIR_RMF)) {
-						if (debug)
-							printf("DEBUG: SKIP: mkdir/r: %s\n", path);
-						break;
-					} else if (fd != -1 && rm_rf(path, NULL, false, false))
-						warn("rmrf(%s)", path);
+                if (fd == -1 && errno != ENOENT) 
+                    break;
+                else if (fd == -1 && errno == ENOENT) {
+                    /* OK */ 
+                } else if (fd != -1 && !(act == MKDIR_RMF)) {
+                    if (debug)
+                        printf("DEBUG: SKIP:  mkdir/r: %s\n", path);
+                    break;
+                } else if (fd != -1 && rm_rf(path, NULL, false, false))
+                    warn("rmrf(%s)", path);
 
-					if (fd != -1)
-						close(fd);
+                if (fd != -1)
+                    close(fd);
 
-					/* mkpath performs chmod */
-					if (mkpath(path, (defmode ? DEF_FOLD : mode)) == -1)
-						warn("MKDIR: mkpath(%s)", path);
-					if (lchown(path, uid, gid))
-						warn("MKDIR: lchown(%s,%d,%d)", path, uid, gid);
+                /* mkpath performs chmod */
+                if (mkpath(path, (defmode ? DEF_FOLD : mode)) == -1)
+                    warn("MKDIR: mkpath(%s)", path);
+                if (lchown(path, uid, gid))
+                    warn("MKDIR: lchown(%s,%d,%d)", path, uid, gid);
 
-					if (debug)
-						printf("DEBUG: mkdir/r: %s:%d.%d:0%o\n", path, uid, gid, (defmode ? DEF_FOLD : mode));
-				}
+                if (debug)
+                    printf("DEBUG: mkdir/r: %s:%d.%d:0%o\n", path, uid, gid, (defmode ? DEF_FOLD : mode));
+            }
 
-				break;
+            break;
 
-				/* f - Create a file if it does not exist
-				 * F - Create a file, truncate if exists
-				 *
-				 * Age: ignored
-				 * Argument: written to the file, suffixed by \n
-				 */
-			case CREAT_FILE:
-			case TRUNC_FILE:
+            /* f  - Create a file if it does not exist (only write if created)
+             * f+ - Create a file, truncate if exists (always write?)
+             *
+             * Age: ignored
+             * Argument: written to the file (with trailing newline?)
+             */
+        case CREAT_FILE:
 
+            if (do_clean && age) {
+                if (rm_if_old(path, age, true))
+                    warn("CREATE/TRUNC_FILE: rm_if_old %s", path);
+                else if (debug)
+                    printf("DEBUG: CLEAN: %s\n", path);
+            }
 
-				if (do_clean && age) {
-					if (rm_if_old(path, age, true))
-						warn("CREATE/TRUNC_FILE: rm_if_old %s", path);
-					else if (debug)
-						printf("DEBUG: CLEAN: %s\n", path);
-				}
+            if (do_remove) {
+                if (unlink_wrapper(path, true) && errno != ENOENT)
+                    warn("CREATE/TRUNC_FILE: unlink_wrapper %s", path);
+                else if (debug)
+                    printf("DEBUG: REMOVE: %s\n", path);
+            }
 
-				if (do_remove) {
-					if (unlink_wrapper(path, true) && errno != ENOENT)
-						warn("CREATE/TRUNC_FILE: unlink_wrapper %s", path);
-					else if (debug)
-						printf("DEBUG: REMOVE: %s\n", path);
-				}
+            if (do_create) {
+                struct stat sb;
+                if (stat(path, &sb) == -1) {
+                    if (errno != ENOENT) {
+                        warn("CREATE/TRUNC_FILE: stat %s", path);
+                        break;
+                    }
+                } else if (!(act & MOD_PLUS)) {
+                    if (debug)
+                        printf("DEBUG: SKIP:  create/trunc_file: %s\n", path);
+                    break;
+                }
 
-				if (do_create) {
-					struct stat sb;
-					if (stat(path, &sb) == -1) {
-						if (errno != ENOENT) {
-							warn("CREATE/TRUNC_FILE: stat %s", path);
-							break;
-						}
-					} else if (act == CREAT_FILE) {
-						if (debug)
-							printf("DEBUG: SKIP: create/trunc_file: %s\n", path);
-						break;
-					}
+                if ((fd = open(path, 
+                                O_RDWR|O_CREAT|( (mod & MOD_PLUS) ? O_TRUNC : 0 ),
+                                (defmode ? DEF_FILE : mode)
+                              )) == -1) {
+                    warn("open(%s)", path);
+                    break;
+                }
 
-					if ((fd = open(path, 
-							O_RDWR|O_CREAT|( (act == TRUNC_FILE) ? O_TRUNC : 0 ),
-							(defmode ? DEF_FILE : mode)
-							)) == -1) {
-						warn("open(%s)", path);
-						break;
-					}
+                if (fchown(fd, uid, gid))
+                    warn("CREATE/TRUNC_FILE: fchown(%s, %d, %d)", path, uid, gid);
 
-					if (fchown(fd, uid, gid))
-						warn("CREATE/TRUNC_FILE: fchown(%s, %d, %d)", path, uid, gid);
+                if (arg && *arg != '-')
+                    if (write(fd, arg, strlen(arg)) == -1)
+                        warn("CREATE/TRUNC_FILE: write");
 
-					close(fd);
+                close(fd);
 
-					if (debug)
-						printf("DEBUG: create/trunc_file %s\n", path);
+                if (debug)
+                    printf("DEBUG: create/trunc_file %s\n", path);
 
-				}
-				break;
+            }
+            break;
 
-				/* C - Recursively copy a file or directory, if the destination 
-				 *     files or directories do not exist yet
-				 *
-				 * Argument: specifics the source folder/file. 
-				 *           If blank uses /usr/share/factory/$NAME
-				 */
-			case COPY:
-				if (do_create) {
-					dest = pathcat(opt_root, arg);
-					/* TODO */
-					printf("src=%s\n", dest);
-				}
-				break;
+            /* C - Recursively copy a file or directory, if the destination 
+             *     files or directories do not exist yet
+             *
+             * Argument: specifics the source folder/file. 
+             *           If blank uses /usr/share/factory/$NAME
+             */
+        case COPY:
+            {
+                struct stat sb;
+                bool exists;
+                bool dest_dir;
+                bool factory;
+                bool src_dir;
+                char buf[PATH_MAX];
 
-				/* p - Create a pipe (FIFO) if it does not exist
-				 * p+ - Remove and create a pipe (FIFO)
-				 *
-				 * Argument: ignored
-				 */
-			case CREATE_PIPE:
-				if (do_clean && age) {
-					/* TODO */
-				}
+                /* check the destination */
+                if (stat(path, &sb) == -1) {
+                    if (errno != ENOENT)
+                        break;
 
-				if (do_create) {
-					fd = open(path, O_RDONLY);
-					if (fd == -1 && errno != ENOENT) 
-						break;
-					else if (fd != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
-						warn("CREATE_PIPE: unlink_wrapper");
-						break;
-					}
+                    exists = false;
+                    dest_dir = false;
+                } else {
+                    exists = true;
+                    dest_dir = !!S_ISDIR(sb.st_mode);
+                }
 
-					if (fd != -1)
-						close(fd);
+                /* check the source */
+                if (arg && *arg != '-') {
+                    if ((src = pathcat(opt_root, arg)) == NULL) {
+                        warn("COPY: pathcat(arg)");
+                        break;
+                    }
+                    factory = false;
+                } else {
+                    if ((src = pathcat(opt_root, "/usr/share/factory/")) == NULL) {
+                        warn("COPY: pathcat(factory)");
+                        break;
+                    }
+                    strcpy(rawpath, src);
+                    free(src);
 
-					if ( mkfifo(path, mode) ) {
-						warn("mkfifo(%s)", path);
-						break;
-					}
-					
-					if (chown(path, uid, gid))
-						warn("chown(%s)", path);
+                    if ((src = pathcat(buf, rawpath)) == NULL) {
+                        warn("COPY: pathcat(factory)");
+                        break;
+                    }
+                    factory = true;
+                }
 
-					if (debug)
-						printf("DEBUG: create_pipe %s\n", path);
-				}
-				break;
+                if (stat(src, &sb) == -1) {
+                    warn("COPY: stat(argument)");
+                    break;
+                }
 
-				/* L - Create a symlink if it does not exist
-				 * L+ - Unlink and then create
-				 *
-				 * Mode: ignored
-				 * UID/GID: ignored
-				 * Argument: if empty, symlink to /usr/share/factory/$NAME
-				 */
-			case CREATE_SYM: // FIXME handle NULL dest => /usr/share/factory
-				if (do_clean && age) {
-					/* TODO */
-				}
+                src_dir = !!S_ISDIR(sb.st_mode);
 
-				if (do_create) {
-					if (strncmp("../", arg, 3) )
-						dest = pathcat(opt_root, arg);
-					else
-						dest = strdup(arg);
+                /* process actions */
 
-					if (dest == NULL) {
-						warn("CREATE_SYM: dest");
-						break;
-					}
+                if (do_clean && age) {
+                    /* TODO */
+                }
 
-					struct stat sb;
-					ret = lstat(path, &sb);
+                if (do_remove) {
+                    /* TODO */
+                }
 
-					if (ret == -1 && errno != ENOENT) {
-						/* failed to stat with a worrying error */
-						warn("CREATE_SYM: open");
-						break;
-					} else if (ret == -1) { 
-						/* must be ENOENT, so fine */
-					} else if (!S_ISLNK(sb.st_mode) && (mod & MOD_PLUS)) {
-						/* if the existing file is NOT a symlink, we have a problem */
-						warnx("CREATE_SYM: existing file is not a symlink: %s", path);
-						break;
-					} else if (!(mod & MOD_PLUS)) {
-						/* file exists so ignore */
-						if (debug)
-							printf("DEBUG: SKIP: symlink dest=%s path=%s\n", dest, path);
-						break;
-					} else if ((mod & MOD_PLUS) && unlink_wrapper(path, false)) {
-						/* file exists, but we had a problem removing it first */
-						warn("unlink_wrapper(%s)", path);
-						break;
-					}
+                if (do_create) {
+                    if (src_dir && dest_dir) {
+                        warn("COPY: attempt to copy folder(%s) to file(%s)", src, path);
+                        break;
+                    } else if (src_dir && !dest_dir) {
+                        printf("COPY: recursively copy src_dir to dest_dir\n");
+                    } else if (!src_dir && dest_dir) {
+                        printf("COPY: copy src_file to dest_dir\n");
+                    } else if (!src_dir && !dest_dir) {
+                        printf("COPY: copy src_file to dest_file\n");
+                    }
 
-					if ( symlink(dest, path) == -1 ) {
-						warn("symlink(%s, %s)", dest, path);
-						break;
-					}
-					
-					if (debug)
-						printf("DEBUG: symlink dest=%s path=%s\n", dest, path);
-				}
-				break;
+                    if (factory) {
+                    } else {
+                    }
 
-				/* c - Create a character file if it does not exist
-				 * c+ - Remove and create a character file
-				 *
-				 * Argument: ignored
-				 */
-			case CREATE_CHAR:
-				if (do_clean && age) {
-					/* TODO */
-				}
+                    /* TODO */
+                    printf("COPY: src=%s dest=%s exists=%d dest_dir=%d src_dir=%d factory=%d\n", 
+                            src, path, exists, dest_dir, src_dir, factory);
+                }
+            }
+            break;
 
-				if (do_create) {
-					struct stat sb;
-					ret = stat(path, &sb);
+            /* p - Create a pipe (FIFO) if it does not exist
+             * p+ - Remove and create a pipe (FIFO)
+             *
+             * Argument: ignored
+             */
+        case CREATE_PIPE:
+            if (do_clean && age) {
+                /* TODO */
+            }
 
-					if (ret == -1 && errno != ENOENT) {
-						/* failed to stat with unknown error */
-						warn("CREATE_CHAR: lstat");
-						break;
-					} else if (ret == -1) {
-						/* NOENT: OK */
-					} else if (ret != -1 && !(mod & MOD_PLUS)) {
-						/* file exists, but not c+ */
-						if (debug)
-							printf("DEBUG: SKIP: create_char %s\n", path);
-						break;
-					} else if (ret != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
-						warn("CREATE_CHAR: unlink_wrapper(%s)", path);
-						break;
-					}
+            if (do_create) {
+                fd = open(path, O_RDONLY);
+                if (fd == -1 && errno != ENOENT) 
+                    break;
+                else if (fd != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
+                    warn("CREATE_PIPE: unlink_wrapper");
+                    break;
+                }
 
-					if ( mknod(path, (defmode ?  DEF_FILE : mode)|S_IFCHR, dev)) {
-						warn("mknod(%s)", path);
-						break;
-					}
-					
-					if (chown(path, uid, gid))
-						warn("chown(%s)", path);
+                if (fd != -1)
+                    close(fd);
 
-					if (debug)
-						printf("DEBUG: create_char %s\n", path);
-				}
-				break;
+                if ( mkfifo(path, mode) ) {
+                    warn("mkfifo(%s)", path);
+                    break;
+                }
 
-				/* b - Create a block device node if it does not exist
-				 * b+ - Remove and create
-				 *
-				 * Argument: ignored
-				 */
-			case CREATE_BLK:
-				if (do_clean && age) {
-					/* TODO */
-				}
+                if (chown(path, uid, gid))
+                    warn("chown(%s)", path);
 
-				if (do_create) {
-					/* TODO */
-					dest = pathcat(opt_root, arg);
-				}
-				break;
-			default:
-				break;
-		}
-	}
+                if (debug)
+                    printf("DEBUG: create_pipe %s\n", path);
+            }
+            break;
+
+            /* L - Create a symlink if it does not exist
+             * L+ - Unlink and then create
+             *
+             * Mode: ignored
+             * UID/GID: ignored
+             * Argument: if empty, symlink to /usr/share/factory/$NAME
+             */
+        case CREATE_SYM: // FIXME handle NULL dest => /usr/share/factory
+            if (do_clean && age) {
+                /* TODO */
+            }
+
+            if (do_create) {
+                if (strncmp("../", arg, 3) )
+                    dest = pathcat(opt_root, arg);
+                else
+                    dest = strdup(arg);
+
+                if (dest == NULL) {
+                    warn("CREATE_SYM: dest");
+                    break;
+                }
+
+                struct stat sb;
+                ret = lstat(path, &sb);
+
+                if (ret == -1 && errno != ENOENT) {
+                    /* failed to stat with a worrying error */
+                    warn("CREATE_SYM: open");
+                    break;
+                } else if (ret == -1) { 
+                    /* must be ENOENT, so fine */
+                } else if (!S_ISLNK(sb.st_mode) && (mod & MOD_PLUS)) {
+                    /* if the existing file is NOT a symlink, we have a problem */
+                    warnx("CREATE_SYM: existing file is not a symlink: %s", path);
+                    break;
+                } else if (!(mod & MOD_PLUS)) {
+                    /* file exists so ignore */
+                    if (debug)
+                        printf("DEBUG: SKIP:  symlink dest=%s path=%s\n", dest, path);
+                    break;
+                } else if ((mod & MOD_PLUS) && unlink_wrapper(path, false)) {
+                    /* file exists, but we had a problem removing it first */
+                    warn("unlink_wrapper(%s)", path);
+                    break;
+                }
+
+                if ( symlink(dest, path) == -1 ) {
+                    warn("symlink(%s, %s)", dest, path);
+                    break;
+                }
+
+                if (debug)
+                    printf("DEBUG: symlink dest=%s path=%s\n", dest, path);
+            }
+            break;
+
+            /* c - Create a character file if it does not exist
+             * c+ - Remove and create a character file
+             *
+             * Argument: ignored
+             */
+        case CREATE_CHAR:
+            if (do_clean && age) {
+                /* TODO */
+            }
+
+            if (do_create) {
+                struct stat sb;
+                ret = stat(path, &sb);
+
+                if (ret == -1 && errno != ENOENT) {
+                    /* failed to stat with unknown error */
+                    warn("CREATE_CHAR: lstat");
+                    break;
+                } else if (ret == -1) {
+                    /* NOENT: OK */
+                } else if (ret != -1 && !(mod & MOD_PLUS)) {
+                    /* file exists, but not c+ */
+                    if (debug)
+                        printf("DEBUG: SKIP:  create_char %s\n", path);
+                    break;
+                } else if (ret != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
+                    warn("CREATE_CHAR: unlink_wrapper(%s)", path);
+                    break;
+                }
+
+                if ( mknod(path, (defmode ?  DEF_FILE : mode)|S_IFCHR, dev)) {
+                    warn("mknod(%s)", path);
+                    break;
+                }
+
+                if (chown(path, uid, gid))
+                    warn("chown(%s)", path);
+
+                if (debug)
+                    printf("DEBUG: create_char %s\n", path);
+            }
+            break;
+
+            /* b - Create a block device node if it does not exist
+             * b+ - Remove and create
+             *
+             * Argument: ignored
+             */
+        case CREATE_BLK:
+            if (do_clean && age) {
+                /* TODO */
+            }
+
+            if (do_create) {
+                /* TODO */
+                dest = pathcat(opt_root, arg);
+            }
+            break;
+        default:
+            break;
+    }
 
 cleanup:
 
-	if (fd != -1) 
-		close(fd);
-	if (rawtype) 
-		free(rawtype);
-	if (path) 
-		free(path);
-	if (modet) 
-		free(modet);
-	if (uidt) 
-		free(uidt);
-	if (gidt)
-		free(gidt);
-	if (aget) 
-		free(aget);
-	if (arg) 
-		free(arg);
-	if (dest)
-		free(dest);
-	if (fileglob) 
-		globfree(fileglob);
+    if (fd != -1) 
+        close(fd);
+    if (src)
+        free(src);
+    if (rawtype) 
+        free(rawtype);
+    if (path) 
+        free(path);
+    if (modet) 
+        free(modet);
+    if (uidt) 
+        free(uidt);
+    if (gidt)
+        free(gidt);
+    if (aget) 
+        free(aget);
+    if (arg) 
+        free(arg);
+    if (dest)
+        free(dest);
+    if (fileglob) 
+        globfree(fileglob);
+    if (rawpath)
+        free(rawpath);
 }
 
-__attribute__((nonnull(1)))
+    __attribute__((nonnull(1)))
 static void process_file(const char *file, const char *folder)
 {
-	char *in = NULL;
-	int len = 0;
-	char *line = NULL;
-	ssize_t cnt = 0;
-	size_t ignore = 0;
+    char *in = NULL;
+    int len = 0;
+    char *line = NULL;
+    ssize_t cnt = 0;
+    size_t ignore = 0;
 
-	//if (file == NULL) {
-	//	warnx("file is NULL");
-	//	return;
-	//}
+    //if (file == NULL) {
+    //	warnx("file is NULL");
+    //	return;
+    //}
 
-	if (folder) {
-		if ( !(in = calloc(1, (len = strlen(file) + 
-							strlen(folder) + 2))) ) {
-			warn("calloc");
-			return;
-		}
-		snprintf(in, len, "%s/%s", folder, file);
-	} else {
-		in = strdup(file);
-	}
+    if (folder) {
+        if ( !(in = calloc(1, (len = strlen(file) + 
+                            strlen(folder) + 2))) ) {
+            warn("calloc");
+            return;
+        }
+        snprintf(in, len, "%s/%s", folder, file);
+    } else {
+        in = strdup(file);
+    }
 
-	//printf("processing %s\n", in);
+    //printf("processing %s\n", in);
 
-	if (ignores) {
-		ignores_size = 0;
-		free(ignores);
-		ignores = NULL;
-	}
+    if (ignores) {
+        ignores_size = 0;
+        free(ignores);
+        ignores = NULL;
+    }
 
-	FILE *fp;
+    FILE *fp;
 
-	if ( (fp = fopen(in, "r")) != NULL) {
-		while( (cnt = getline(&line, &ignore, fp)) != -1 )
-		{
-			if (line == NULL) continue;
+    if ( (fp = fopen(in, "r")) != NULL) {
+        while( (cnt = getline(&line, &ignore, fp)) != -1 )
+        {
+            if (line == NULL) continue;
 
-			line = trim(line);
-			if (cnt != 1 && line[0] != '#')
-				process_line(line);
+            line = trim(line);
+            if (cnt != 1 && line[0] != '#')
+                process_line(line);
 
-			free(line);
-			line = NULL;
-		}
+            free(line);
+            line = NULL;
+        }
 
-		fclose(fp);
-	} else
-		warn("fopen");
+        fclose(fp);
+    } else
+        warn("fopen");
 
-	free(in);
+    free(in);
 }
 
 #define CFG_EXT ".conf"
 #define CFG_EXT_LEN sizeof(CFG_EXT)
 
-__attribute__((nonnull))
+    __attribute__((nonnull))
 static void process_folder(const char *folder)
 {
-	DIR *dirp;
-	struct dirent *dirent;
-	int len;
+    DIR *dirp;
+    struct dirent *dirent;
+    int len;
 
-	//printf("checking folder: %s\n", folder);
-	if ( !(dirp = opendir(folder)) ) {
-		warn("opendir(%s)", folder);
-		return;
-	}
+    //printf("checking folder: %s\n", folder);
+    if ( !(dirp = opendir(folder)) ) {
+        warn("opendir(%s)", folder);
+        return;
+    }
 
-	while( (dirent = readdir(dirp)) )
-	{
-		if ( is_dot(dirent->d_name) )
-			continue;
-		if ( (len = strlen(dirent->d_name)) <= (int)CFG_EXT_LEN ) 
-			continue;
-		if ( strncmp(dirent->d_name + len - CFG_EXT_LEN + 1, CFG_EXT, 
-					CFG_EXT_LEN) ) 
-			continue;
-		process_file(dirent->d_name, folder);
-	}
+    while( (dirent = readdir(dirp)) )
+    {
+        if ( is_dot(dirent->d_name) )
+            continue;
+        if ( (len = strlen(dirent->d_name)) <= (int)CFG_EXT_LEN ) 
+            continue;
+        if ( strncmp(dirent->d_name + len - CFG_EXT_LEN + 1, CFG_EXT, 
+                    CFG_EXT_LEN) ) 
+            continue;
+        process_file(dirent->d_name, folder);
+    }
 }
 
 #undef CFG_EXT
@@ -1371,99 +1496,99 @@ static void process_folder(const char *folder)
 
 static const struct option long_options[] = {
 
-	{"create",			no_argument,		&do_create,		true},
-	{"clean",			no_argument,		&do_clean,		true},
-	{"remove",			no_argument,		&do_remove,		true},
-	{"boot",			no_argument,		&do_boot,		true},
-	{"prefix",			required_argument,	0,				'p'},
-	{"exclude-prefix",	required_argument,	0,				'e'},
-	{"root",			required_argument,	0,				'r'},
-	{"help",			no_argument,		&do_help,		true},
-	{"version",			no_argument,		&do_version,	true},
-	{"debug",           no_argument,        &debug,         true},
-	{"debug-unlink",    no_argument,        &debug_unlink,  true},
+    {"create",			no_argument,		&do_create,		true},
+    {"clean",			no_argument,		&do_clean,		true},
+    {"remove",			no_argument,		&do_remove,		true},
+    {"boot",			no_argument,		&do_boot,		true},
+    {"prefix",			required_argument,	0,				'p'},
+    {"exclude-prefix",	required_argument,	0,				'e'},
+    {"root",			required_argument,	0,				'r'},
+    {"help",			no_argument,		&do_help,		true},
+    {"version",			no_argument,		&do_version,	true},
+    {"debug",           no_argument,        &debug,         true},
+    {"debug-unlink",    no_argument,        &debug_unlink,  true},
 
-	{0,0,0,0}
+    {0,0,0,0}
 };
 
 
 int main(int argc, char *argv[])
 {
-	int c, fail = 0;
+    int c, fail = 0;
 
-	while (1)
-	{
-		int option_index;
+    while (1)
+    {
+        int option_index;
 
-		c = getopt_long(argc, argv, "h", long_options, &option_index);
+        c = getopt_long(argc, argv, "h", long_options, &option_index);
 
-		if (c == -1)
-			break;
+        if (c == -1)
+            break;
 
-		switch (c)
-		{
-			case 'p':
-				opt_prefix = strdup(optarg);
-				break;
-			case 'e':
-				opt_exclude = strdup(optarg);
-				break;
-			case 'r':
-				opt_root = strdup(optarg);
-				break;
-			case 'h':
-				do_help = 1;
-				break;
-			case '?':
-				fail = 1;
-				break;
-			case 0:
-				break;
-			default:
-				break;
-		}
-	}
+        switch (c)
+        {
+            case 'p':
+                opt_prefix = strdup(optarg);
+                break;
+            case 'e':
+                opt_exclude = strdup(optarg);
+                break;
+            case 'r':
+                opt_root = strdup(optarg);
+                break;
+            case 'h':
+                do_help = 1;
+                break;
+            case '?':
+                fail = 1;
+                break;
+            case 0:
+                break;
+            default:
+                break;
+        }
+    }
 
-	if (optind < argc) {
-		if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
-			err(EXIT_FAILURE, "main: calloc");
+    if (optind < argc) {
+        if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
+            err(EXIT_FAILURE, "main: calloc");
 
-		while (optind < argc)
-			config_files[num_config_files++] = strdup(argv[optind++]);
-	}
+        while (optind < argc)
+            config_files[num_config_files++] = strdup(argv[optind++]);
+    }
 
-	if (fail) {
-		show_help();
-		exit(EXIT_FAILURE);
-	}
+    if (fail) {
+        show_help();
+        exit(EXIT_FAILURE);
+    }
 
-	if (do_help) {
-		show_help();
-		exit(EXIT_SUCCESS);
-	}
+    if (do_help) {
+        show_help();
+        exit(EXIT_SUCCESS);
+    }
 
-	if (do_version) {
-		show_version();
-		exit(EXIT_SUCCESS);
-	}
+    if (do_version) {
+        show_version();
+        exit(EXIT_SUCCESS);
+    }
 
-	if (!opt_root)
-		opt_root = "";
+    if (!opt_root)
+        opt_root = "";
 
 #ifdef DEBUG
-	printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
-			"do_remove=%d,do_boot=%d\nroot=%s\n",
-			do_create, do_clean, do_remove, do_boot,
-			root);
+    printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
+            "do_remove=%d,do_boot=%d\nroot=%s\n",
+            do_create, do_clean, do_remove, do_boot,
+            root);
 #endif
 
-	/* TODO move these to constants somewhere e.g. config.h */
-	process_folder(pathcat(opt_root, "/etc/tmpfiles.d"));
-	process_folder(pathcat(opt_root, "/run/tmpfiles.d"));
-	process_folder(pathcat(opt_root, "/usr/lib/tmpfiles.d"));
+    /* TODO move these to constants somewhere e.g. config.h */
+    process_folder(pathcat(opt_root, "/etc/tmpfiles.d"));
+    process_folder(pathcat(opt_root, "/run/tmpfiles.d"));
+    process_folder(pathcat(opt_root, "/usr/lib/tmpfiles.d"));
 
-	for (int i = 0; i < num_config_files; i++)
-		process_file(pathcat(opt_root, config_files[i]), NULL);
+    for (int i = 0; i < num_config_files; i++)
+        process_file(pathcat(opt_root, config_files[i]), NULL);
 
-	exit(EXIT_SUCCESS);
+    exit(EXIT_SUCCESS);
 }
