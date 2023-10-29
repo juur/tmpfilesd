@@ -13,7 +13,6 @@
 /* TODO refactor to not free(str) */
 char *trim(char *str)
 {
-
 	char *ret = str;
 	int i, len;
 

@@ -22,9 +22,7 @@
 #include <libgen.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-//#include <alloca.h>
 #include <string.h>
-//#include "lite.h"
 
 /**
  * mkpath - Like makepath() but takes a mode_t argument
@@ -39,18 +37,21 @@ int mkpath(char *dir, mode_t mode)
 	struct stat sb;
 	char *tmp;
 
-	if (!dir) {
+	if (dir == NULL) {
 		errno = EINVAL;
-		return 1;
+		return -1;
 	}
 
-	if (!stat(dir, &sb))
+	if (stat(dir, &sb) == 0)
 		return 0;
 
-	if ((tmp = strdup(dir)) == NULL)
-		return 1;
+	if (errno != ENOENT)
+		return -1;
 
-	mkpath(dirname(strdup(dir)), mode);
+	if ((tmp = strdup(dir)) == NULL)
+		return -1;
+
+	mkpath(dirname(tmp), mode);
 
 	free(tmp);
 

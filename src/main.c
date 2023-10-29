@@ -116,8 +116,6 @@ __attribute__((unused))
 	};
 
 
-#define MAX(a, b) (a < b ? b : a)
-
 #define DEF_FILE ((mode_t)(S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH))
 #define DEF_FOLD ((mode_t)(DEF_FILE|S_IXUSR|S_IXGRP|S_IXOTH))
 
@@ -151,6 +149,27 @@ typedef struct ignent {
 static ignent_t *ignores = NULL;
 static int ignores_size = 0;
 
+static const struct option long_options[] = {
+
+	{"create",			no_argument,		&do_create,		true},
+	{"clean",			no_argument,		&do_clean,		true},
+	{"remove",			no_argument,		&do_remove,		true},
+	{"boot",			no_argument,		&do_boot,		true},
+	{"prefix",			required_argument,	0,				'p'},
+	{"exclude-prefix",	required_argument,	0,				'e'},
+	{"root",			required_argument,	0,				'r'},
+	{"help",			no_argument,		&do_help,		true},
+	{"version",			no_argument,		&do_version,	true},
+	{"debug",           no_argument,        &debug,         true},
+	{"debug-unlink",    no_argument,        &debug_unlink,  true},
+
+	{0,0,0,0}
+};
+
+static const char   cfg_ext[]   = ".conf";
+static const size_t cfg_ext_len = sizeof(cfg_ext);
+
+
 static void show_version(void)
 {
 	printf("tmpfilesd %s\n", VERSION);
@@ -174,7 +193,7 @@ static void show_help(void)
 		  );
 }
 
-	__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static int validate_type(const char *raw, char *type)
 {
 	const char *tmp;
@@ -205,7 +224,7 @@ static int validate_type(const char *raw, char *type)
 /*
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
-	__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result))
 static uid_t vet_uid(const char **t, bool *defuid)
 {
 	if (!*t || **t == '-') {
@@ -231,7 +250,7 @@ static uid_t vet_uid(const char **t, bool *defuid)
 /*
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
-	__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result))
 static gid_t vet_gid(const char **t, bool *defgid)
 {
 	if (!*t || **t == '-') {
@@ -254,7 +273,7 @@ static gid_t vet_gid(const char **t, bool *defgid)
 	return gr->gr_gid;
 }
 
-
+__attribute__((warn_unused_result))
 static const char *getbootid(void)
 {
 	if (bootid)
@@ -280,7 +299,7 @@ static const char *getbootid(void)
 	return bootid;
 }
 
-
+__attribute__((warn_unused_result))
 static const char *getkernelrelease(void)
 {
 	if (kernelrel)
@@ -303,6 +322,7 @@ static const char *getkernelrelease(void)
 	return kernelrel;
 }
 
+__attribute__((warn_unused_result))
 static const char *gethost(void)
 {
 	if (hostname)
@@ -322,6 +342,7 @@ static const char *gethost(void)
 	return hostname;
 }
 
+__attribute__((warn_unused_result))
 static const char *getmachineid(void)
 {
 	if (machineid)
@@ -355,7 +376,7 @@ static const char *getmachineid(void)
  * If prefixed with "~" this is masked on the already set bits.
  * If prefixed with ":" then mode is only used on creation.
  */
-__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static mode_t vet_mode(const char **t, mode_t *mask, bool *defmode, bool *create_only)
 {
 	const char *mod = *t;
@@ -403,7 +424,7 @@ static mode_t vet_mode(const char **t, mode_t *mask, bool *defmode, bool *create
 }
 
 /* TODO stop doing free(path) as pointer may be reused by callers */
-	__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static char *expand_path(char *path)
 {
 	const int buf_len = 1024;
@@ -481,7 +502,7 @@ static char *expand_path(char *path)
  * %v - Kernel release (uname -r)
  * %% - %
  */
-	__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static char *vet_path(char *path)
 {
 	if (strchr(path, '%'))
@@ -500,7 +521,7 @@ static char *vet_path(char *path)
  * but not the files and directories immediately inside it.
  */
 
-	__attribute__((nonnull))
+__attribute__((nonnull, warn_unused_result))
 static struct timeval *vet_age(const char **t, int *subonly)
 {
 	if (!*t || **t == '-') {
@@ -519,11 +540,11 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	} else 
 		*subonly = 0;
 
-	read = sscanf(src, "%u%ms", &ret, &tmp);
+	read = sscanf(src, "%d%ms", &ret, &tmp);
 
 	if (read == 0 || read > 2) {
 		if (tmp) free(tmp);
-		warnx("invalid age: %s\n", *t);
+		warnx("vet_age: invalid age: %s\n", *t);
 		return NULL;
 	}
 
@@ -543,14 +564,14 @@ static struct timeval *vet_age(const char **t, int *subonly)
 		val = (uint64_t)ret * 1000000 * 60 * 60 * 24 * 7;
 	else {
 		if (tmp) free(tmp);
-		warnx("invalid age: %s\n", *t);
+		warnx("vet_age: invalid age: %s\n", *t);
 		return NULL;
 	}
 
 	struct timeval *tv = calloc(1, sizeof(struct timeval));
 
 	if (!tv) {
-		warn("calloc");
+		warn("vet_age: calloc");
 		if (tmp) free(tmp);
 		return NULL;
 	}
@@ -564,7 +585,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
 	return(tv);
 }
 
-	__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result))
 static int glob_file(const char *path, char ***matches, size_t *count,
 		glob_t **pglob)
 {
@@ -603,7 +624,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 }
 
 /* a wrapper function around unlink(3) that checks for ignored paths */
-	__attribute__((nonnull,warn_unused_result))
+__attribute__((nonnull,warn_unused_result))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
 {
 	if (check_ignores) {
@@ -627,7 +648,7 @@ static int unlink_wrapper(const char *pathname, bool check_ignores)
 	return unlink(pathname);
 }
 
-	__attribute__((nonnull,warn_unused_result))
+__attribute__((nonnull(1),warn_unused_result))
 static int rm_if_old(const char *path, const struct timeval *tv, bool check_ignores)
 {
 	struct stat sb;
@@ -644,16 +665,16 @@ static int rm_if_old(const char *path, const struct timeval *tv, bool check_igno
 	printf("%s mtime=%lu now=%lu age=%lu diff=%lu\n",
 			path,
 			sb.st_mtime,
-			time(0),
-			tv->tv_sec,
-			time(0) - sb.st_mtime);
+			now,
+			tv ? tv->tv_sec : 0,
+			now - sb.st_mtime);
 #endif
 
 	if (S_ISDIR(sb.st_mode)) {
 		errno = EISDIR;
 		warn("rm_if_old: folder(%s)", path);
 		return -1;
-	} else if ((now - sb.st_mtime) > tv->tv_sec) {
+	} else if ((tv == NULL) || ((now - sb.st_mtime) > tv->tv_sec)) {
 		return unlink_wrapper(path, check_ignores);
 	}
 
@@ -727,6 +748,7 @@ static int rm_rf(const char *path, const struct timeval *tv,
 }
 
 /* execute the action against a single path entry */
+__attribute__((nonnull(2,14), warn_unused_result))
 static int execute_action(char act, char *path, const struct timeval *age, 
 		const char *arg,
 		mode_t mode, bool defmode, mode_t mask,
@@ -926,6 +948,8 @@ static int execute_action(char act, char *path, const struct timeval *age,
 						}
 
 					}
+
+					closedir(dirp);
 
 				} else { /* !subonly */
 					if (do_clean && age) {
@@ -1381,7 +1405,7 @@ static void process_line(const char *line)
 		}
 
 		for (i = 0; i < (int)nglobs; i++) {
-			execute_action(
+			if (execute_action(
 					act, globs[i], age, arg, 
 					mode, defmode, mask,
 					defuid, uid,
@@ -1390,10 +1414,23 @@ static void process_line(const char *line)
 					mod,
 					raw_path,
 					dev
-					);
+					)) {
+				/* failed */ ;
+			}
 		}
 	} else {
-		//execute_action(act, path);
+		if (execute_action(
+					act, path, age, arg, 
+					mode, defmode, mask,
+					defuid, uid,
+					defgid, gid,
+					subonly,
+					mod,
+					raw_path,
+					dev
+					)) {
+			/* failed */ ;
+		}
 	}
 
 cleanup:
@@ -1434,15 +1471,16 @@ static void process_file(const char *file, const char *folder)
 	if (folder) {
 		if ( !(in = calloc(1, (len = strlen(file) + 
 							strlen(folder) + 2))) ) {
-			warn("calloc");
+			warn("process_file: calloc");
 			return;
 		}
 		snprintf(in, len, "%s/%s", folder, file);
 	} else {
-		in = strdup(file);
+		if ((in = strdup(file)) == NULL) {
+			warn("process_file: strdup");
+			return;
+		}
 	}
-
-	//printf("processing %s\n", in);
 
 	if (ignores) {
 		ignores_size = 0;
@@ -1455,10 +1493,11 @@ static void process_file(const char *file, const char *folder)
 	if ( (fp = fopen(in, "r")) != NULL) {
 		while( (cnt = getline(&line, &ignore, fp)) != -1 )
 		{
-			if (line == NULL) continue;
+			if (line == NULL)
+				continue;
 
 			line = trim(line);
-			if (cnt != 1 && line[0] != '#')
+			if (cnt != 1 && line[0] != '#' && line[0] != '\n' && line[0])
 				process_line(line);
 
 			free(line);
@@ -1467,13 +1506,10 @@ static void process_file(const char *file, const char *folder)
 
 		fclose(fp);
 	} else
-		warn("fopen");
+		warn("process_file: fopen: <%s>", in);
 
 	free(in);
 }
-
-#define CFG_EXT ".conf"
-#define CFG_EXT_LEN sizeof(CFG_EXT)
 
 __attribute__((nonnull))
 static void process_folder(const char *folder)
@@ -1482,9 +1518,8 @@ static void process_folder(const char *folder)
 	struct dirent *dirent;
 	int len;
 
-	//printf("checking folder: %s\n", folder);
 	if ( !(dirp = opendir(folder)) ) {
-		warn("opendir(%s)", folder);
+		warn("process_folder: opendir: <%s>", folder);
 		return;
 	}
 
@@ -1492,79 +1527,53 @@ static void process_folder(const char *folder)
 	{
 		if ( is_dot(dirent->d_name) )
 			continue;
-		if ( (len = strlen(dirent->d_name)) <= (int)CFG_EXT_LEN ) 
+		if ( (len = strlen(dirent->d_name)) <= (int)cfg_ext_len ) 
 			continue;
-		if ( strncmp(dirent->d_name + len - CFG_EXT_LEN + 1, CFG_EXT, 
-					CFG_EXT_LEN) ) 
+		if ( strncmp(dirent->d_name + len - cfg_ext_len + 1, cfg_ext, 
+					cfg_ext_len) ) 
 			continue;
+
 		process_file(dirent->d_name, folder);
 	}
+
+	closedir(dirp);
 }
 
-#undef CFG_EXT
-#undef CFG_EXT_LEN
+static void clean_config_files(void)
+{
+	if (config_files == NULL)
+		return;
 
-static const struct option long_options[] = {
+	for (int i = 0; i < num_config_files; i++)
+		if (config_files[i])
+			free (config_files[i]);
 
-	{"create",			no_argument,		&do_create,		true},
-	{"clean",			no_argument,		&do_clean,		true},
-	{"remove",			no_argument,		&do_remove,		true},
-	{"boot",			no_argument,		&do_boot,		true},
-	{"prefix",			required_argument,	0,				'p'},
-	{"exclude-prefix",	required_argument,	0,				'e'},
-	{"root",			required_argument,	0,				'r'},
-	{"help",			no_argument,		&do_help,		true},
-	{"version",			no_argument,		&do_version,	true},
-	{"debug",           no_argument,        &debug,         true},
-	{"debug-unlink",    no_argument,        &debug_unlink,  true},
-
-	{0,0,0,0}
-};
-
+	free(config_files);
+}
 
 int main(int argc, char *argv[])
 {
 	int c, fail = 0;
 
-	while (1)
+	while (true)
 	{
 		int option_index;
 
-		c = getopt_long(argc, argv, "h", long_options, &option_index);
-
-		if (c == -1)
+		if ((c = getopt_long(argc, argv, "h", long_options, &option_index)) == -1)
 			break;
 
 		switch (c)
 		{
-			case 'p':
-				opt_prefix = strdup(optarg);
-				break;
-			case 'e':
-				opt_exclude = strdup(optarg);
-				break;
-			case 'r':
-				opt_root = strdup(optarg);
-				break;
-			case 'h':
-				do_help = 1;
-				break;
-			case '?':
-				fail = 1;
-				break;
+			case 'p': opt_prefix  = strdup(optarg); break;
+			case 'e': opt_exclude = strdup(optarg); break;
+			case 'r': opt_root    = strdup(optarg); break;
+			case 'h': do_help = 1; break;
+			case '?': fail    = 1; break;
+			
 			case 0:
-				break;
 			default:
 				break;
 		}
-	}
-
-	if (optind < argc) {
-		if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
-			err(EXIT_FAILURE, "main: calloc");
-
-		while (optind < argc)
-			config_files[num_config_files++] = strdup(argv[optind++]);
 	}
 
 	if (fail) {
@@ -1582,6 +1591,18 @@ int main(int argc, char *argv[])
 		exit(EXIT_SUCCESS);
 	}
 
+	if (optind < argc) {
+		if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
+			err(EXIT_FAILURE, "main: calloc");
+
+		atexit(clean_config_files);
+
+		while (optind < argc)
+			if ((config_files[num_config_files++] = strdup(argv[optind++])) == NULL) {
+				err(EXIT_FAILURE, "main: strdup");
+			}
+	}
+
 	if (!opt_root)
 		opt_root = "";
 
@@ -1597,8 +1618,16 @@ int main(int argc, char *argv[])
 	process_folder(pathcat(opt_root, "/run/tmpfiles.d"));
 	process_folder(pathcat(opt_root, "/usr/lib/tmpfiles.d"));
 
-	for (int i = 0; i < num_config_files; i++)
-		process_file(pathcat(opt_root, config_files[i]), NULL);
+	for (int i = 0; i < num_config_files; i++) {
+		char *tmp;
+		if ((tmp = pathcat(opt_root, config_files[i])) == NULL) {
+			warn("main: pathcat");
+		} else {
+			process_file(tmp, NULL);
+			free(tmp);
+		}
+	}
 
+	/* TODO should this be EXIT_FAILURE if any single error/warning occured? */
 	exit(EXIT_SUCCESS);
 }
