@@ -178,7 +178,6 @@ static int validate_type(const char *raw, char *type)
 	int ret;
 
 	ret = 0;
-
 	*type = raw[0];
 
 	for (tmp = (raw + 1); *tmp; tmp++)
@@ -192,7 +191,8 @@ static int validate_type(const char *raw, char *type)
 
 			case '^': 
 			default:
-				warnx("type modifier '%c' is unsupported", isprint(*tmp) ? *tmp : '?');
+				errno = EINVAL;
+				warnx("validate_type: type modifier '%c' is unsupported", isprint(*tmp) ? *tmp : '?');
 				return -1;
 		}
 
@@ -218,7 +218,7 @@ static uid_t vet_uid(const char **t, uid_t *defuid)
 	struct passwd *pw;
 
 	if ( (pw = getpwnam(*t)) == NULL) {
-		warn("getpwnam");
+		warn("vet_uid: getpwnam");
 		return -1;
 	}
 
@@ -244,7 +244,7 @@ static gid_t vet_gid(const char **t, gid_t *defgid)
 	struct group *gr;
 
 	if ( (gr = getgrnam(*t)) == NULL) {
-		warn("getgrnam");
+		warn("vet_gid: getgrnam");
 		return -1;
 	}
 
@@ -261,7 +261,7 @@ static const char *getbootid(void)
 	size_t ign = 0;
 
 	if ( (fp = fopen("/proc/sys/kernel/random/boot_id", "r")) == NULL ) {
-		warn("fopen");
+		warn("getbootid: fopen");
 		return NULL;
 	}
 
@@ -270,7 +270,7 @@ static const char *getbootid(void)
 			free(bootid);
 			bootid = NULL;
 		}
-		warnx("getline");
+		warn("getbootid: getline");
 	}
 	bootid = trim(bootid);
 	fclose(fp);
@@ -286,14 +286,14 @@ static const char *getkernelrelease(void)
 	struct utsname *un;
 
 	if ( !(un = calloc(1, sizeof(struct utsname))) ) {
-		warn("calloc");
+		warn("getkernelrelease: calloc");
 		return NULL;
 	}
 
 	if ( uname(un) ) {
-		warn("uname");
-	} else {
-		kernelrel = strdup(un->release);
+		warn("getkernelrelease: uname");
+	} else if ((kernelrel = strdup(un->release)) == NULL) {
+		warn("getkernelrelease: strdup");
 	}
 
 	free(un);
@@ -305,11 +305,13 @@ static const char *gethost(void)
 	if (hostname)
 		return hostname;
 
-	if ((hostname = calloc(1, HOST_NAME_MAX + 1)) == NULL)
+	if ((hostname = calloc(1, HOST_NAME_MAX + 1)) == NULL) {
+		warn("gethost: calloc");
 		return NULL;
+	}
 
 	if (gethostname(hostname, HOST_NAME_MAX)) {
-		warn("gethostname");
+		warn("gethost: gethostname");
 		free(hostname);
 		hostname = NULL;
 	}
@@ -326,7 +328,7 @@ static const char *getmachineid(void)
 	size_t ign = 0;
 
 	if ( !(fp = fopen("/etc/machine-id", "r")) ) {
-		warn("getmachineid");
+		warn("getmachineid: fopen");
 		return NULL;
 	}
 
@@ -335,7 +337,7 @@ static const char *getmachineid(void)
 			free(machineid);
 			machineid = NULL;
 		}
-		warnx("getline");
+		warn("getmachineid: getline");
 	}
 	machineid = trim(machineid);
 	fclose(fp);
@@ -348,10 +350,16 @@ static const char *getmachineid(void)
  * means mode will not be touched
  *
  * If prefixed with "~" this is masked on the already set bits.
+ * If prefixed with ":" then mode is only used on creation.
  */
 __attribute__((nonnull))
-static mode_t vet_mode(const char **t, mode_t *mask, mode_t *defmode)
+static mode_t vet_mode(const char **t, mode_t *mask, mode_t *defmode, bool *create_only)
 {
+	const char *mod = *t;
+
+	*mask = 0;
+	*create_only = 0;
+
 	if (!*t || **t == '-') {
 		*defmode = 1;
 		return 0;
@@ -359,13 +367,18 @@ static mode_t vet_mode(const char **t, mode_t *mask, mode_t *defmode)
 
 	*defmode = 0;
 
-	const char *mod = *t;
-
-	if (*mod == '~') {
-		*mask = 1;
+	while (*mod && !isdigit(*mod)) {
+		switch (*mod)
+		{
+			case '~': *mask = true;        break;
+			case ':': *create_only = true; break;
+			default:
+				errno = EINVAL;
+				warnx("vet_mode: invalid prefix");
+				return -1;
+		}
 		mod++;
-	} else
-		*mask = 0;
+	}
 
 	if (!isnumber(mod)) {
 		errno = EINVAL;
@@ -723,24 +736,28 @@ static void process_line(const char *line)
     size_t nglobs = 0;
     glob_t *fileglob = NULL;
     int fd = -1;
+    int i;
     int ret;
     actions_t act;
-
     uid_t uid = -1; uid_t defuid = 1;
     gid_t gid = -1; gid_t defgid = 1;
-    mode_t mode = -1; mode_t defmode = 1; mode_t mask = 0;
+    mode_t mode = -1; mode_t defmode = 1; mode_t mask = 0; bool mode_create_only = false;
     dev_t dev = 0;
     int mod = 0;
 
     struct timeval *age = NULL;
     const struct config_element *cfg_elem;
 
+    errno = 0;
     fields = sscanf(line, 
             "%ms %ms %ms %ms %ms %ms %m[^\n]s",
             &rawtype, &rawpath, &modet, &uidt, &gidt, &aget, &arg);
 
-    if ( fields < 2 ) {
-        warnx("bad line: %s\n", line);
+    if ( fields == EOF || fields < 2 ) {
+        if (errno)
+            warn("process_line: sscanf");
+        else
+            warnx("process_line: bad line: %s\n", line);
         goto cleanup;
     } 
 
@@ -751,7 +768,7 @@ static void process_line(const char *line)
         goto cleanup;
 
     if ( (mod = validate_type(rawtype, &type)) == -1 ) {
-        warnx("process_line: bad type: %s", line);
+        warn("process_line: bad type: %s", line);
         goto cleanup;
     } 
 
@@ -763,30 +780,19 @@ static void process_line(const char *line)
     cfg_elem = &configuration[(uint8_t)type];
     act = cfg_elem->act;
 
+    /* validate & tidy up fields */
+
     path = pathcat(opt_root, rawpath);
-
-    /* preserve these for COPY */
-
-    /*
-       tmppath = NULL;
-       free(tmppath);
-       */
 
     if (uidt) uid   = vet_uid((const char **)&uidt, &defuid);
     if (gidt) gid   = vet_gid((const char **)&gidt, &defgid);
-    if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode);
+    if (modet) mode = vet_mode((const char **)&modet, &mask, &defmode, &mode_create_only);
     // FIXME handle '~'
     if (aget) age   = vet_age((const char **)&aget, &subonly);
     if (path) path  = vet_path(path);
 
     if (path == NULL)
         goto cleanup;
-
-    int i;
-
-    //if (debug)
-      //  printf("DEBUG: processing '%c' do_boot=%d MOD_BOOT_ONLY=%d\n", 
-        //        type, do_boot, mod & MOD_BOOT_ONLY);
 
     /* skip if not applicable due to boot mode & settings */
     if ( (do_boot && !(mod & MOD_BOOT_ONLY)) || (!do_boot && (mod & MOD_BOOT_ONLY)) )
