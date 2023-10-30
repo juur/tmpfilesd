@@ -34,28 +34,28 @@
  */
 int mkpath(char *dir, mode_t mode)
 {
-	struct stat sb;
-	char *tmp;
+    struct stat sb;
+    char *tmp;
 
-	if (dir == NULL) {
-		errno = EINVAL;
-		return -1;
-	}
+    if (dir == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
 
-	if (stat(dir, &sb) == 0)
-		return 0;
+    if (stat(dir, &sb) == 0)
+        return 0;
 
-	if (errno != ENOENT)
-		return -1;
+    if (errno != ENOENT)
+        return -1;
 
-	if ((tmp = strdup(dir)) == NULL)
-		return -1;
+    if ((tmp = strdup(dir)) == NULL)
+        return -1;
 
-	mkpath(dirname(tmp), mode);
+    mkpath(dirname(tmp), mode);
 
-	free(tmp);
+    free(tmp);
 
-	return mkdir(dir, mode);
+    return mkdir(dir, mode);
 }
 
 /**
@@ -70,7 +70,7 @@ int mkpath(char *dir, mode_t mode)
  */
 int makepath(char *dir)
 {
-	return mkpath(dir, 0777);
+    return mkpath(dir, 0777);
 }
 
 /**
