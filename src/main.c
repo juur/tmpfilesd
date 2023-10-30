@@ -241,21 +241,21 @@ static int validate_type(const char *raw, char *type)
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
 __attribute__((nonnull, warn_unused_result))
-static uid_t vet_uid(const char **t, bool *defuid)
+static uid_t vet_uid(const char *t, bool *defuid)
 {
-    if (!*t || **t == '-') {
+    if (*t == '-') {
         *defuid = true;
         return (uid_t)-1;
     }
 
     *defuid = false;
 
-    if (isnumber(*t))
-        return atol(*t);
+    if (isnumber(t))
+        return atol(t);
 
     struct passwd *pw;
 
-    if ((pw = getpwnam(*t)) == NULL) {
+    if ((pw = getpwnam(t)) == NULL) {
         warn("vet_uid: getpwnam");
         return -1;
     }
@@ -267,21 +267,21 @@ static uid_t vet_uid(const char **t, bool *defuid)
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
 __attribute__((nonnull, warn_unused_result))
-static gid_t vet_gid(const char **t, bool *defgid)
+static gid_t vet_gid(const char *t, bool *defgid)
 {
-    if (!*t || **t == '-') {
+    if (*t == '-') {
         *defgid = true;
         return (gid_t)-1;
     }
 
     *defgid = false;
 
-    if (isnumber(*t))
-        return atol(*t);
+    if (isnumber(t))
+        return atol(t);
 
     struct group *gr;
 
-    if ((gr = getgrnam(*t)) == NULL) {
+    if ((gr = getgrnam(t)) == NULL) {
         warn("vet_gid: getgrnam");
         return -1;
     }
@@ -393,14 +393,14 @@ static const char *getmachineid(void)
  * If prefixed with ":" then mode is only used on creation.
  */
 __attribute__((nonnull, warn_unused_result))
-static mode_t vet_mode(const char **t, mode_t *mask, bool *defmode, bool *create_only)
+static mode_t vet_mode(const char *t, mode_t *mask, bool *defmode, bool *create_only)
 {
-    const char *mod = *t;
+    const char *mod = t;
 
     *mask = 0;
     *create_only = 0;
 
-    if (!*t || **t == '-') {
+    if (*t == '-') {
         *defmode = true;
         return 0;
     }
@@ -587,7 +587,7 @@ __attribute__((nonnull, warn_unused_result))
 static char *vet_path(char *path)
 {
     if (strchr(path, '%'))
-        path = expand_path(path);
+        return(expand_path(path));
 
     return path;
 }
@@ -603,9 +603,9 @@ static char *vet_path(char *path)
  */
 
 __attribute__((nonnull, warn_unused_result))
-static struct timeval *vet_age(const char **t, int *subonly)
+static struct timeval *vet_age(const char *t, int *subonly)
 {
-    if (!*t || **t == '-') {
+    if (*t == '-') {
         errno = EINVAL;
         return NULL;
     }
@@ -613,7 +613,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
     uint64_t val;
     int read, ret;
     char *tmp = NULL;
-    const char *src = *t;
+    const char *src = t;
 
     if (*src == '~') {
         *subonly = 1;
@@ -625,7 +625,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
 
     if (read == 0 || read > 2) {
         if (tmp) free(tmp);
-        warnx("vet_age: invalid age: %s\n", *t);
+        warnx("vet_age: invalid age: %s\n", t);
         return NULL;
     }
 
@@ -646,7 +646,7 @@ static struct timeval *vet_age(const char **t, int *subonly)
     } else {
         if (tmp)
             free(tmp);
-        warnx("vet_age: invalid age: %s\n", *t);
+        warnx("vet_age: invalid age: %s\n", t);
         return NULL;
     }
 
@@ -1491,12 +1491,13 @@ static void process_line(const char *line)
 
     path = pathcat(opt_root, raw_path);
 
-    if (raw_uid) uid   = vet_uid((const char **)&raw_uid, &defuid);
-    if (raw_gid) gid   = vet_gid((const char **)&raw_gid, &defgid);
-    if (raw_mode) mode = vet_mode((const char **)&raw_mode, &mask, &defmode, &mode_create_only);
+    if (raw_uid) uid   = vet_uid(raw_uid, &defuid);
+    if (raw_gid) gid   = vet_gid(raw_gid, &defgid);
+    if (raw_mode) mode = vet_mode(raw_mode, &mask, &defmode, &mode_create_only);
     // FIXME handle '~'
-    if (raw_age) age   = vet_age((const char **)&raw_age, &subonly);
-    if (path) path  = vet_path(path);
+    if (raw_age) age   = vet_age(raw_age, &subonly);
+    if (path) path     = vet_path(path);
+    if (arg)  arg      = vet_path(arg);
 
     if (path == NULL)
         goto cleanup;
