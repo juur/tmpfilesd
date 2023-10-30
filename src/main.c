@@ -290,7 +290,7 @@ static gid_t vet_gid(const char *t, bool *defgid)
 }
 
 __attribute__((warn_unused_result))
-static const char *getbootid(void)
+static char *getbootid(void)
 {
     if (bootid)
         return bootid;
@@ -359,7 +359,7 @@ static const char *gethost(void)
 }
 
 __attribute__((warn_unused_result))
-static const char *getmachineid(void)
+static char *getmachineid(void)
 {
     if (machineid)
         return machineid;
@@ -448,6 +448,7 @@ static char *expand_path(char *path)
     char *buf;
     char *ptr = path;
     const char *cpy;
+    char *free_me;
     char tmp;
     int spos = 0, dpos = 0;
     char string[BUFSIZ];
@@ -472,6 +473,7 @@ static char *expand_path(char *path)
             continue;
 
         cpy = NULL;
+        free_me = NULL;
 
         switch (tmp)
         {
@@ -480,11 +482,11 @@ static char *expand_path(char *path)
                 break;
 
             case 'b': /* Boot ID */
-                cpy = getbootid();
+                cpy = free_me = getbootid();
                 break;
 
             case 'm': /* Machine ID */
-                cpy = getmachineid();
+                cpy = free_me = getmachineid();
                 break;
 
             case 'H': /* Host name */
@@ -568,6 +570,9 @@ print_gid:
             strncpy(buf + dpos, cpy, buf_len - dpos);
             dpos += strlen(cpy);
         }
+
+        if (free_me)
+            free(free_me);
 
         spos++;
     }
@@ -1429,10 +1434,11 @@ __attribute__((nonnull))
 static void process_line(const char *line)
 {
     char *raw_type = NULL, *raw_path = NULL, *raw_mode = NULL;
-    char *raw_uid = NULL,  *raw_gid = NULL,  *raw_age = NULL;
-    char *arg = NULL;
+    char *raw_uid  = NULL,  *raw_gid = NULL,  *raw_age = NULL;
+    char *arg      = NULL;
 
     char *dest = NULL, *src = NULL, *path = NULL;
+
     char type;
 
     int subonly = 0;
@@ -1440,8 +1446,8 @@ static void process_line(const char *line)
     int i = 0;
     int ret = 0;
 
-    char **globs = NULL;
-    size_t nglobs = 0;
+    char  **globs    = NULL;
+    size_t  nglobs   = 0;
     glob_t *fileglob = NULL;
 
     actions_t act;
@@ -1456,10 +1462,12 @@ static void process_line(const char *line)
     const struct config_element *cfg_elem = NULL;
 
     errno = 0;
+    /* Type Path Mode User Group Age Argument */
     fields = sscanf(line,
             "%ms %ms %ms %ms %ms %ms %m[^\n]s",
             &raw_type, &raw_path, &raw_mode, &raw_uid, &raw_gid, &raw_age, &arg);
 
+    /* Type and Path are mandatory for all types */
     if (fields == EOF || fields < 2) {
         if (errno)
             warn("process_line: sscanf");
@@ -1475,7 +1483,7 @@ static void process_line(const char *line)
         goto cleanup;
 
     if ((mod = validate_type(raw_type, &type)) == -1) {
-        warn("process_line: bad type: %s", line);
+        warn("process_line: bad type format: %s", line);
         goto cleanup;
     }
 
@@ -1487,20 +1495,31 @@ static void process_line(const char *line)
     cfg_elem = &configuration[(uint8_t)type];
     act = cfg_elem->act;
 
+    /* ensure an argument is present for those that require it */
+    if (cfg_elem->arg_type && arg == NULL) {
+        warnx("process_line: argument is mandaotry for type: %s", line);
+        goto cleanup;
+    }
+
     /* validate & tidy up fields */
 
-    path = pathcat(opt_root, raw_path);
 
     if (raw_uid) uid   = vet_uid(raw_uid, &defuid);
     if (raw_gid) gid   = vet_gid(raw_gid, &defgid);
     if (raw_mode) mode = vet_mode(raw_mode, &mask, &defmode, &mode_create_only);
     // FIXME handle '~'
     if (raw_age) age   = vet_age(raw_age, &subonly);
-    if (path) path     = vet_path(path);
-    if (arg)  arg      = vet_path(arg);
 
-    if (path == NULL)
+    /* perform tmpfiles.d specific expansions */
+    if (raw_path) dest = vet_path(raw_path);
+    if (arg)      arg  = vet_path(arg);
+
+    if (dest == NULL)
         goto cleanup;
+
+    path = pathcat(opt_root, dest);
+    free(dest);
+    dest = NULL;
 
     /* skip if not applicable due to boot mode & settings */
     if ((do_boot && !(mod & MOD_BOOT_ONLY)) 
@@ -1568,8 +1587,8 @@ cleanup:
         free(dest);
     if (fileglob)
         globfree(fileglob);
-    if (raw_path)
-        free(raw_path);
+    //if (raw_path)
+    //    free(raw_path);
 }
 
 __attribute__((nonnull(1)))
