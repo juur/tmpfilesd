@@ -22,6 +22,12 @@
 #include <stdbool.h>
 #include <limits.h>
 
+#ifdef __linux__
+# include <sys/sysmacros.h>
+#else
+# error "No way to define makedev()"
+#endif
+
 #include "config.h"
 #include "util.h"
 
@@ -235,6 +241,19 @@ static int validate_type(const char *raw, char *type)
         }
 
     return ret;
+}
+
+__attribute__((nonnull))
+static dev_t vet_dev(const char *t)
+{
+    unsigned int major, minor;
+
+    if (sscanf(t, "%u:%u", &major, &minor) != 2) {
+        warnx("vet_dev: invalid format: <%s>", t);
+        return -1;
+    }
+
+    return makedev(major, minor);
 }
 
 /*
@@ -1264,45 +1283,6 @@ mkdir_skip:
             }
             break;
 
-            /* p - Create a pipe (FIFO) if it does not exist
-             * p+ - Remove and create a pipe (FIFO)
-             *
-             * Argument: ignored
-             */
-        case CREATE_PIPE:
-            if (do_clean && age) {
-                /* TODO */
-            }
-
-            if (do_create) {
-                if ((fd = open(path, O_RDONLY)) == -1 && errno != ENOENT) {
-                    /* OK */
-                    break;
-                } else if (fd != -1 
-                        && (mod & MOD_PLUS) 
-                        && unlink_wrapper(path, false)) {
-                    warn("CREATE_PIPE: unlink_wrapper: <%s>", path);
-                    break;
-                }
-
-                if (fd != -1)
-                    close(fd);
-
-                if (mkfifo(path, mode)) {
-                    warn("CREATE_PIPE: mkfifo: <%s>", path);
-                    break;
-                }
-
-                if ((uid != (uid_t)-1 || gid != (gid_t)-1) 
-                        && lchown(path, uid, gid)) {
-                    warn("CREATE_PIPE: chown: <%s>", path);
-                }
-
-                if (debug)
-                    printf("DEBUG: DONE:  create_pipe <%s>\n", path);
-            }
-            break;
-
             /* L - Create a symlink if it does not exist
              * L+ - Unlink and then create
              *
@@ -1360,12 +1340,18 @@ mkdir_skip:
             }
             break;
 
-            /* c - Create a character file if it does not exist
+            /* c  - Create a character file if it does not exist
              * c+ - Remove and create a character file
+             * b  - Create a block device node if it does not exist
+             * b+ - Remove and create
+             * p  - Create a pipe (FIFO) if it does not exist
+             * p+ - Remove and create a pipe (FIFO)
              *
              * Argument: ignored
              */
         case CREATE_CHAR:
+        case CREATE_BLK:
+        case CREATE_PIPE:
             if (do_clean && age) {
                 /* TODO */
             }
@@ -1376,48 +1362,55 @@ mkdir_skip:
 
                 if (ret == -1 && errno != ENOENT) {
                     /* failed to stat with unknown error */
-                    warn("CREATE_CHAR: lstat");
+                    warn("CREATE_CHAR/BLK/PIPE: lstat");
                     break;
                 } else if (ret == -1) {
                     /* NOENT: OK */
                 } else if (ret != -1 && !(mod & MOD_PLUS)) {
                     /* file exists, but not c+ */
                     if (debug)
-                        printf("DEBUG: SKIP:  create_char %s\n", path);
+                        printf("DEBUG: SKIP:  create_char/blk %s\n", path);
                     break;
                 } else if (ret != -1 && (mod & MOD_PLUS) && unlink_wrapper(path, false)) {
-                    warn("CREATE_CHAR: unlink_wrapper(%s)", path);
+                    warn("CREATE_CHAR/BLK/PIPE: unlink_wrapper(%s)", path);
                     goto fail;
                 }
 
-                if (mknod(path, (defmode ? def_file_mode : mode)|S_IFCHR, dev)) {
-                    warn("mknod(%s)", path);
-                    goto fail;
+                switch (act) 
+                {
+                    case CREATE_CHAR:  mode = S_IFCHR; break;
+                    case CREATE_BLK:   mode = S_IFBLK; break;
+                    case CREATE_PIPE:  mode = 0;       break;
                 }
 
-                if (chown(path, uid, gid))
+                mode |= (defmode ? def_file_mode : mode);
+
+                switch (act)
+                {
+                    case CREATE_PIPE:
+                        if (mkfifo(path, mode)) {
+                            warn("CREATE_PIPE: mkfifo: <%s>", path);
+                            goto fail;
+                        }
+                        break;
+
+                    case CREATE_CHAR:
+                    case CREATE_BLK:
+                        if (mknod(path, mode, dev)) {
+                            warn("CREATE_CHAR/BLK: mknod(%s)", path);
+                            goto fail;
+                        }
+                        break;
+                }
+
+                if (lchown(path, uid, gid))
                     warn("chown(%s)", path);
 
                 if (debug)
-                    printf("DEBUG: create_char %s\n", path);
+                    printf("DEBUG: create_char/blk %s\n", path);
             }
             break;
 
-            /* b - Create a block device node if it does not exist
-             * b+ - Remove and create
-             *
-             * Argument: ignored
-             */
-        case CREATE_BLK:
-            if (do_clean && age) {
-                /* TODO */
-            }
-
-            if (do_create) {
-                /* TODO */
-                dest = pathcat(opt_root, arg);
-            }
-            break;
         default:
             break;
     }
@@ -1534,7 +1527,16 @@ static void process_line(const char *line)
         goto cleanup;
 
     /* TODO process ARG_NODE */
-    dev = 0;
+    if (cfg_elem->arg_type == ARG_NODE) {
+        if (arg == NULL) {
+            warn("process_line: missing argument for device node");
+            goto cleanup;
+        }
+
+        if ((dev = vet_dev(arg)) == (dev_t)-1)
+            goto cleanup;
+    } else
+        dev = -1;
 
     if ((cfg_elem->options & CFG_GLOB)) {
         if ((ret = glob_file(path, &globs, &nglobs, &fileglob))) {
