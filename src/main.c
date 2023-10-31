@@ -290,7 +290,7 @@ static gid_t vet_gid(const char *t, bool *defgid)
 }
 
 __attribute__((warn_unused_result))
-static char *getbootid(void)
+static const char *getbootid(void)
 {
     if (bootid)
         return bootid;
@@ -309,8 +309,9 @@ static char *getbootid(void)
             bootid = NULL;
         }
         warn("getbootid: getline");
-    }
-    bootid = trim(bootid);
+    } else
+        bootid = trim(bootid);
+
     fclose(fp);
     return bootid;
 }
@@ -359,7 +360,7 @@ static const char *gethost(void)
 }
 
 __attribute__((warn_unused_result))
-static char *getmachineid(void)
+static const char *getmachineid(void)
 {
     if (machineid)
         return machineid;
@@ -482,11 +483,11 @@ static char *expand_path(char *path)
                 break;
 
             case 'b': /* Boot ID */
-                cpy = free_me = getbootid();
+                cpy = getbootid();
                 break;
 
             case 'm': /* Machine ID */
-                cpy = free_me = getmachineid();
+                cpy = getmachineid();
                 break;
 
             case 'H': /* Host name */
@@ -657,7 +658,7 @@ static struct timeval *vet_age(const char *t, int *subonly)
 
     struct timeval *tv;
 
-    if ((tv = calloc(1, sizeof(struct timeval))) == NULL) {
+    if ((tv = malloc(sizeof(struct timeval))) == NULL) {
         warn("vet_age: calloc");
         if (tmp)
             free(tmp);
@@ -698,6 +699,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
             errno = ENOENT;
 
         globfree(*pglob);
+        free(*pglob);
 
         *pglob = NULL;
         *matches = NULL;
@@ -1421,6 +1423,8 @@ mkdir_skip:
     }
 
 done:
+    if (dest)
+        free(dest);
     if (fd != -1)  {
         close(fd);
     }
@@ -1521,6 +1525,9 @@ static void process_line(const char *line)
     free(dest);
     dest = NULL;
 
+    if (path == NULL)
+        goto cleanup;
+
     /* skip if not applicable due to boot mode & settings */
     if ((do_boot && !(mod & MOD_BOOT_ONLY)) 
             || (!do_boot && (mod & MOD_BOOT_ONLY)))
@@ -1585,10 +1592,10 @@ cleanup:
         free(arg);
     if (dest)
         free(dest);
+    if (age)
+        free(age);
     if (fileglob)
         globfree(fileglob);
-    //if (raw_path)
-    //    free(raw_path);
 }
 
 __attribute__((nonnull(1)))
@@ -1626,7 +1633,7 @@ static void process_file(const char *file, const char *folder)
         while( (cnt = getline(&line, &ignore, fp)) != -1 )
         {
             if (line == NULL)
-                continue;
+                break;
 
             line = trim(line);
             if (cnt != 1 && line[0] != '#' && line[0] != '\n' && line[0])
@@ -1635,6 +1642,9 @@ static void process_file(const char *file, const char *folder)
             free(line);
             line = NULL;
         }
+
+        if (line)
+            free(line);
 
         fclose(fp);
     } else
@@ -1682,6 +1692,29 @@ static void clean_config_files(void)
     free(config_files);
 }
 
+static void clean_constants(void)
+{
+    if (hostname)
+        free(hostname);
+    if (machineid)
+        free(machineid);
+    if (kernelrel)
+        free(kernelrel);
+    if (bootid)
+        free(bootid);
+
+    if (ignores)
+        free(ignores);
+
+    if (opt_prefix)
+        free(opt_prefix);
+    if (opt_exclude)
+        free(opt_exclude);
+    if (opt_root)
+        free(opt_root);
+}
+
+
 
 
 /* public functions */
@@ -1726,6 +1759,8 @@ int main(int argc, char *argv[])
         exit(EXIT_SUCCESS);
     }
 
+    atexit(clean_constants);
+
     if (optind < argc) {
         if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
             err(EXIT_FAILURE, "main: calloc");
@@ -1748,10 +1783,23 @@ int main(int argc, char *argv[])
             root);
 #endif
 
+    char *tmppath;
+
     /* TODO move these to constants somewhere e.g. config.h */
-    process_folder(pathcat(opt_root, "/etc/tmpfiles.d"));
-    process_folder(pathcat(opt_root, "/run/tmpfiles.d"));
-    process_folder(pathcat(opt_root, "/usr/lib/tmpfiles.d"));
+    if ((tmppath = pathcat(opt_root, "/etc/tmpfiles.d")) == NULL)
+        err(EXIT_FAILURE, "main: pathcat");
+    process_folder(tmppath);
+    free(tmppath);
+
+    if ((tmppath = pathcat(opt_root, "/run/tmpfiles.d")) == NULL)
+        err(EXIT_FAILURE, "main: pathcat");
+    process_folder(tmppath);
+    free(tmppath);
+
+    if ((tmppath = pathcat(opt_root, "/usr/lib/tmpfiles.d")) == NULL)
+        err(EXIT_FAILURE, "main: pathcat");
+    process_folder(tmppath);
+    free(tmppath);
 
     for (int i = 0; i < num_config_files; i++) {
         char *tmp;
