@@ -21,6 +21,7 @@
 #include <time.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <libgen.h>
 
 #ifdef __linux__
 # include <sys/sysmacros.h>
@@ -29,7 +30,8 @@
 #endif
 
 #include "config.h"
-#include "util.h"
+
+extern int mkpath(char *dir, mode_t mode) __attribute__((nonnull));
 
 
 
@@ -41,6 +43,9 @@
 #define MOD_BASE64       (1<<3)
 #define MOD_SERVICE_CRED (1<<4)
 #define MOD_PLUS         (1<<5)
+
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 
 
@@ -190,6 +195,81 @@ static const mode_t def_folder_mode = def_file_mode|S_IXUSR|S_IXGRP|S_IXOTH;
 
 
 /* private functions */
+
+/* TODO refactor to not free(str) */
+static char *trim(char *str)
+{
+	char *ret = str;
+	int i, len;
+
+	len = strlen(str);
+
+	for (i = len - 1; i; i--)
+	{
+		if (isspace(str[i])) 
+			str[i] = '\0';
+		else 
+			break;
+	}
+	
+	len = strlen(str);
+
+	for (i = 0; i < len; i++)
+		if (!isspace(str[i]))
+			break;
+
+	if (i == 0)
+		return str;
+
+	if ( (ret = calloc(1, MAX(1, len - i))) == NULL )
+		warn("trim: calloc");
+	else {
+		snprintf(ret, len, "%s", str + i);
+		free(str);
+	}
+
+	return ret;
+}
+
+static int is_dot(const char *path)
+{
+	if( !*path )
+		return false;
+
+	if( !strcmp(path, ".") || !strcmp(path, ".." ) )
+		return true;
+
+	return false;
+}
+
+static char *pathcat(const char *a, const char *b)
+{
+	size_t len = strlen(a) + strlen(b) + 2;
+	char *ret;
+
+	if ( (ret = malloc(len)) == NULL ) {
+		warn("malloc");
+		return NULL;
+	}
+
+	strncpy(ret, a, len);
+	if ( *b != '/' && a[strlen(a)-1] != '/')
+		strncat(ret, "/", len);
+	strncat(ret, b, len);
+
+	return ret;
+}
+
+static int isnumber(const char *t)
+{
+	size_t i;
+
+	for (i = 0; i < strlen(t); i++)
+		if( !isdigit(t[i]) )
+			return false;
+
+	return true;
+}
 
 static void show_version(void)
 {
@@ -733,6 +813,182 @@ static int glob_file(const char *path, char ***matches, size_t *count,
     return r;
 }
 
+static int copy_one_file(const char *src, const char *dst)
+{
+    struct stat sb;
+    int rc;
+    int fd_src = -1, fd_dst = -1;
+    
+    if (debug)
+        printf("copy_one_file(%s, %s)\n", src, dst);
+
+    rc = stat(dst, &sb);
+
+    if (rc == -1 && errno != ENOENT) {
+        /* ??? */
+        return -1;
+    } else if (rc != -1) {
+        if (debug)
+            printf("copy_one_file: skip file %s as destination exists\n", src);
+        return 0;
+    }
+
+    if (dst[strlen(dst) - 1] == '/') {
+        /* TODO */
+        errno = ENOSYS;
+        warn("copy_one_file: trying to create a folder: %s", dst);
+        goto fail;
+    }
+
+    if ((fd_src = open(src, O_RDONLY)) == -1)
+        goto fail;
+
+    if ((fd_dst = open(dst, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
+        goto fail;
+
+    char buf[BUFSIZ * 4];
+    ssize_t len;
+
+    while ((len = read(fd_src, buf, sizeof(buf))) > 0)
+    {
+        if (write(fd_dst, buf, len) == -1)
+            goto fail;
+    }
+
+    if (rc == -1)
+        goto fail;
+
+    if (debug)
+        printf(" cp %s %s\n", src, dst);
+
+    close(fd_src);
+    close(fd_dst);
+
+    return 0;
+
+fail:
+    if (fd_src != -1)
+        close(fd_src);
+    if (fd_dst != -1)
+        close(fd_dst);
+    /* TODO unlink partial files? */
+
+    return -1;
+}
+
+static int copy_src_dir(const char *src, const char *dst)
+{
+    struct stat sb;
+    char path_src[PATH_MAX];
+    char path_dst[PATH_MAX];
+    DIR *dirp;
+    int rc;
+
+    if (debug)
+        printf("copy_src_dir(%s, %s)\n", src, dst);
+
+    /* check src exists */
+
+    if ((rc = stat(src, &sb)) == -1 && errno == ENOENT) {
+        if (debug)
+            printf("copy_src_dir: skipping missing source %s\n", src);
+        return 0;
+    } else if (rc == -1) {
+        warn("copy_src_dir: stat(src) %d==%d", errno, ENOENT);
+        return -1;
+    } 
+
+    /* two scenarios: src is a file, or src is a folder */
+
+    if (!S_ISDIR(sb.st_mode)) { 
+
+        /* src is a file */
+        
+        if ((rc = stat(dst, &sb)) == -1 && errno != ENOENT) {
+            /* ??? */
+            return -1;
+        } else if (rc == -1) { /* ENOENT */
+            return copy_one_file(src, dst);
+        } else if (!S_ISDIR(sb.st_mode)) {
+            if (debug)
+                printf("copy_src_dir: skipping %s as destination already present\n", src);
+            return 0;
+        } else if (rc != -1) { /* S_ISDIR() == true */
+            char *tmp_src;
+
+            if ((tmp_src = strdup(src)) == NULL) {
+                warn("copy_src_dir: strdup(src)");
+                return -1;
+            }
+
+            snprintf(path_dst, sizeof(path_dst), "%s/%s", dst, basename(tmp_src));
+            free(tmp_src);
+
+            return copy_one_file(path_dst, src);
+        }
+    } 
+
+    /* src is a folder */
+
+    if ((dirp = opendir(src)) == NULL) {
+        warn("copy_src_dir: opendir(src): %s", src);
+        return -1;
+    }
+
+    struct dirent *ent;
+
+    while ((ent = readdir(dirp)) != NULL)
+    {
+        if (!strcmp(ent->d_name, ".")) continue;
+        if (!strcmp(ent->d_name, "..")) continue;
+
+        snprintf(path_src, sizeof(path_src), "%s/%s", src, ent->d_name);
+        snprintf(path_dst, sizeof(path_dst), "%s/%s", dst, ent->d_name);
+
+        if (stat(path_src, &sb) == -1) {
+            if (errno != ENOENT)
+                warn("copy_src_dir: stat(path_src): %s", path_src);
+            continue;
+        }
+
+        const bool cur_src_dir = !!S_ISDIR(sb.st_mode);
+
+        /* dirent is a file */
+
+        if (!cur_src_dir) {
+            copy_one_file(path_src, path_dst);
+            continue;
+        }
+
+        /* dirent is a folder */
+
+        rc = stat(path_dst, &sb);
+
+        if (rc == -1 && errno == ENOENT) {
+        } else if (rc == -1) {
+            /* ??? */
+        } else { /* rc != -1 */
+            if (debug)
+                printf(" # skip folder %s as destination exists\n", path_src);
+            continue;
+        }
+
+        if (mkdir(path_dst, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH) == -1) {
+            warn("copy_src_dir: mkdir(path_dst): %s", path_dst);
+        }
+
+        if (debug) {
+            printf(" mkdir %s\n", path_dst);
+            printf("recursion into %s\n", path_src);
+        }
+            
+        copy_src_dir(path_src, path_dst);
+    }
+
+    closedir(dirp);
+    return 0;
+}
+
 /* a wrapper function around unlink(3) that checks for ignored paths */
 __attribute__((nonnull,warn_unused_result))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
@@ -1247,7 +1503,9 @@ mkdir_skip:
                 }
 
                 if (stat(src, &sb) == -1) {
-                    warn("COPY: stat(argument)");
+                    if (errno != ENOENT)
+                        warn("COPY: stat: <%s>", src);
+                    free(src);
                     break;
                 }
 
@@ -1260,26 +1518,26 @@ mkdir_skip:
                 }
 
                 if (do_create) {
-                    if (src_dir && dest_dir) {
+                    if (src_dir && !dest_dir) {
                         warn("COPY: attempt to copy folder(%s) to file(%s)", src, path);
                         break;
-                    } else if (src_dir && !dest_dir) {
-                        printf("COPY: recursively copy src_dir to dest_dir\n");
-                    } else if (!src_dir && dest_dir) {
-                        printf("COPY: copy src_file to dest_dir\n");
-                    } else if (!src_dir && !dest_dir) {
-                        printf("COPY: copy src_file to dest_file\n");
-                    }
+                    } 
 
+                    if (copy_src_dir(src, path))
+                        warn("COPY: copy_src_dir");
+                   
+                    /* TODO */
                     if (factory) {
                     } else {
                     }
 
-                    /* TODO */
-                    printf("COPY: src=%s dest=%s exists=%d dest_dir=%d "
-                            "src_dir=%d factory=%d\n",
-                            src, path, exists, dest_dir, src_dir, factory);
+                    if (debug)
+                        printf("COPY: src=%s dest=%s exists=%d dest_dir=%d "
+                                "src_dir=%d factory=%d\n",
+                                src, path, exists, dest_dir, src_dir, factory);
                 }
+
+                free(src);
             }
             break;
 
