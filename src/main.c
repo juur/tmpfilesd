@@ -850,9 +850,6 @@ static int copy_one_file(const char *src, const char *dst)
     int rc;
     int fd_src = -1, fd_dst = -1;
     
-    if (debug)
-        printf("copy_one_file(%s, %s)\n", src, dst);
-
     rc = stat(dst, &sb);
 
     if (rc == -1 && errno != ENOENT) {
@@ -860,7 +857,7 @@ static int copy_one_file(const char *src, const char *dst)
         return -1;
     } else if (rc != -1) {
         if (debug)
-            printf("copy_one_file: skip file %s as destination exists\n", src);
+            printf("DEBUG: copy_one_file: skip file %s as destination exists\n", src);
         return 0;
     }
 
@@ -904,7 +901,7 @@ static int copy_one_file(const char *src, const char *dst)
         goto fail;
 
     if (debug)
-        printf(" cp %s %s\n", src, dst);
+        printf("DEBUG: copy_one_file: cp %s %s\n", src, dst);
 
     close(fd_src);
     close(fd_dst);
@@ -929,14 +926,11 @@ static int copy_src_dir(const char *src, const char *dst)
     DIR *dirp;
     int rc;
 
-    if (debug)
-        printf("copy_src_dir(%s, %s)\n", src, dst);
-
     /* check src exists */
 
     if ((rc = stat(src, &sb)) == -1 && errno == ENOENT) {
         if (debug)
-            printf("copy_src_dir: skipping missing source %s\n", src);
+            printf("DEBUG: copy_src_dir: skipping missing source %s\n", src);
         return 0;
     } else if (rc == -1) {
         warn("copy_src_dir: stat(src) %d==%d", errno, ENOENT);
@@ -956,7 +950,7 @@ static int copy_src_dir(const char *src, const char *dst)
             return copy_one_file(src, dst);
         } else if (!S_ISDIR(sb.st_mode)) {
             if (debug)
-                printf("copy_src_dir: skipping %s as destination already present\n", src);
+                printf("DEBUG: copy_src_dir: skipping %s as destination already present\n", src);
             return 0;
         } else if (rc != -1) { /* S_ISDIR() == true */
             char *tmp_src;
@@ -1014,17 +1008,17 @@ static int copy_src_dir(const char *src, const char *dst)
             /* ??? */
         } else { /* rc != -1 */
             if (debug)
-                printf(" # skip folder %s as destination exists\n", path_src);
+                printf("DEBUG: copy_src_dir: skip folder %s as destination exists\n", path_src);
             continue;
         }
 
         if (mkdir(path_dst, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH) == -1) {
-            warn("copy_src_dir: mkdir(path_dst): %s", path_dst);
+            warn("DEBUG: copy_src_dir: mkdir(path_dst): %s", path_dst);
         }
 
         if (debug) {
-            printf(" mkdir %s\n", path_dst);
-            printf("recursion into %s\n", path_src);
+            printf("DEBUG: copy_src_dir: mkdir %s\n", path_dst);
+            printf("DEBUG: copy_src_dir: recursion into %s\n", path_src);
         }
             
         copy_src_dir(path_src, path_dst);
@@ -1583,7 +1577,7 @@ mkdir_skip:
                     }
 
                     if (debug)
-                        printf("COPY: src=%s dest=%s exists=%d dest_dir=%d "
+                        printf("DEBUG: copy: src=%s dest=%s exists=%d dest_dir=%d "
                                 "src_dir=%d factory=%d\n",
                                 src, path, exists, dest_dir, src_dir, factory);
                 }
