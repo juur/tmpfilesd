@@ -198,6 +198,7 @@ static const mode_t def_folder_mode = def_file_mode|S_IXUSR|S_IXGRP|S_IXOTH;
 /* private functions */
 
 /* TODO refactor to not free(str) */
+__attribute__((nonnull))
 static char *trim(char *str)
 {
 	char *ret = str;
@@ -232,6 +233,7 @@ static char *trim(char *str)
 	return ret;
 }
 
+__attribute__((nonnull))
 static int is_dot(const char *path)
 {
 	if( !*path )
@@ -271,6 +273,7 @@ static char *pathcat(const char *a, const char *b)
     return ret;
 }
 
+__attribute__((nonnull))
 static int isnumber(const char *t)
 {
     size_t i;
@@ -735,7 +738,7 @@ static struct timeval *vet_age(const char *t, int *subonly)
     }
 
     uint64_t val;
-    int read, ret;
+    int len, ret;
     char *tmp = NULL;
     const char *src = t;
 
@@ -745,10 +748,11 @@ static struct timeval *vet_age(const char *t, int *subonly)
     } else
         *subonly = 0;
 
-    read = sscanf(src, "%d%ms", &ret, &tmp);
+    len = sscanf(src, "%d%ms", &ret, &tmp);
 
-    if (read == 0 || read > 2) {
-        if (tmp) free(tmp);
+    if (len == 0 || len > 2) {
+        if (tmp) 
+            free(tmp);
         warnx("vet_age: invalid age: %s\n", t);
         return NULL;
     }
@@ -777,7 +781,7 @@ static struct timeval *vet_age(const char *t, int *subonly)
     struct timeval *tv;
 
     if ((tv = malloc(sizeof(struct timeval))) == NULL) {
-        warn("vet_age: calloc");
+        warn("vet_age: malloc");
         if (tmp)
             free(tmp);
 
