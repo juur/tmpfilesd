@@ -199,37 +199,33 @@ static const mode_t def_folder_mode = def_file_mode|S_IXUSR|S_IXGRP|S_IXOTH;
 
 /* TODO refactor to not free(str) */
 __attribute__((nonnull))
-static char *trim(char *str)
+static char *trim(const char *str)
 {
-	char *ret = str;
+	char *ret;
 	int i, len;
 
-	len = strlen(str);
+    if ((ret = strdup(str)) == NULL) {
+        return NULL;
+    }
+
+	len = strlen(ret);
 
 	for (i = len - 1; i; i--)
 	{
-		if (isspace(str[i])) 
-			str[i] = '\0';
+		if (isspace(ret[i])) 
+			ret[i] = '\0';
 		else 
 			break;
 	}
 	
-	len = strlen(str);
-
 	for (i = 0; i < len; i++)
-		if (!isspace(str[i]))
+		if (!isspace(ret[i]))
 			break;
 
 	if (i == 0)
-		return str;
+		return ret;
 
-	if ( (ret = calloc(1, MAX(1, len - i))) == NULL )
-		warn("trim: calloc");
-	else {
-		snprintf(ret, len, "%s", str + i);
-		free(str);
-	}
-
+    memmove(ret, ret + i, (len - i));
 	return ret;
 }
 
@@ -422,10 +418,15 @@ static const char *getbootid(void)
             bootid = NULL;
         }
         warn("getbootid: getline");
-    } else
-        bootid = trim(bootid);
-
+        fclose(fp);
+        return NULL;
+    }
     fclose(fp);
+
+    char *tmp_bootid = bootid;
+    bootid = trim(tmp_bootid);
+    free(tmp_bootid);
+
     return bootid;
 }
 
@@ -492,9 +493,15 @@ static const char *getmachineid(void)
             machineid = NULL;
         }
         warn("getmachineid: getline");
+        fclose(fp);
+        return NULL;
     }
-    machineid = trim(machineid);
     fclose(fp);
+
+    char *tmp_machineid = machineid;
+    machineid = trim(tmp_machineid);
+    free(tmp_machineid);
+
     return machineid;
 }
 
@@ -836,6 +843,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
     return r;
 }
 
+/* TODO what mode_t for the created file? */
 static int copy_one_file(const char *src, const char *dst)
 {
     struct stat sb;
@@ -866,8 +874,22 @@ static int copy_one_file(const char *src, const char *dst)
     if ((fd_src = open(src, O_RDONLY)) == -1)
         goto fail;
 
-    if ((fd_dst = open(dst, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
+    if (fstat(fd_src, &sb) == -1)
         goto fail;
+
+    if (!S_ISREG(sb.st_mode)) {
+        errno = EBADF;
+        goto fail;
+    }
+
+    /* avoid race condition where stat == ENOENT .. file created .. open() */
+    if ((fd_dst = open(dst, O_WRONLY|O_CREAT|O_EXCL, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1) {
+        if (errno == EEXIST) {
+            close(fd_src);
+            return 0;
+        }
+        goto fail;
+    }
 
     char buf[BUFSIZ * 4];
     ssize_t len;
@@ -878,7 +900,7 @@ static int copy_one_file(const char *src, const char *dst)
             goto fail;
     }
 
-    if (rc == -1)
+    if (len == -1)
         goto fail;
 
     if (debug)
@@ -1927,7 +1949,10 @@ static void process_file(const char *file, const char *folder)
             if (line == NULL)
                 break;
 
-            line = trim(line);
+            char *tmp_line = line;
+            line = trim(tmp_line);
+            free(tmp_line);
+
             if (line == NULL)
                 break;
 
