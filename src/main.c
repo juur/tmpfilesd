@@ -121,6 +121,7 @@ static int do_help=0, do_version=0, debug=0, debug_unlink=0;
 
 static char *opt_prefix = NULL, *opt_exclude = NULL, *opt_root = NULL;
 static char **config_files = NULL;
+static const int max_config_files = 64;
 static int num_config_files = 0;
 
 /* cache responses to varies system lookups in these */
@@ -242,9 +243,12 @@ static int is_dot(const char *path)
 	return false;
 }
 
+__attribute__((nonnull))
 static char *pathcat(const char *a, const char *b)
 {
-	size_t len = strlen(a) + strlen(b) + 2;
+    size_t len_a = strlen(a);
+    size_t len_b = strlen(b);
+	size_t len = len_a + len_b + 2;
 	char *ret;
 
 	if ( (ret = malloc(len)) == NULL ) {
@@ -252,17 +256,24 @@ static char *pathcat(const char *a, const char *b)
 		return NULL;
 	}
 
-	strncpy(ret, a, len);
-	if ( *b != '/' && a[strlen(a)-1] != '/')
-		strncat(ret, "/", len);
-	strncat(ret, b, len);
+    if (len_a) {
+        strncpy(ret, a, len);
 
-	return ret;
+        if (len_b) {
+            if (*b != '/' && a[len_a - 1] != '/')
+                strncat(ret, "/", len);
+            strncat(ret, b, len);
+        }
+    } else
+        strncpy(ret, b, len);
+
+
+    return ret;
 }
 
 static int isnumber(const char *t)
 {
-	size_t i;
+    size_t i;
 
 	for (i = 0; i < strlen(t); i++)
 		if( !isdigit(t[i]) )
@@ -654,8 +665,8 @@ print_gid:
 
             case 'V': /* tmp folder */
                 if (       (cpy = getenv("TMPDIR")) == NULL
-                        || (cpy = getenv("TEMP"))   == NULL
-                        || (cpy = getenv("TMP"))    == NULL
+                        && (cpy = getenv("TEMP"))   == NULL
+                        && (cpy = getenv("TMP"))    == NULL
                    ) {
                     cpy = "/var/tmp";
                 }
@@ -689,12 +700,20 @@ print_gid:
  * %% - %
  */
 __attribute__((nonnull, warn_unused_result))
-static char *vet_path(char *path)
+static char *vet_path(const char *path)
 {
-    if (strchr(path, '%'))
-        return(expand_path(path));
+    char *tmppath;
 
-    return path;
+    if ((tmppath = strdup(path)) == NULL) {
+        warn("vet_path: strdup");
+        return NULL;
+    }
+
+    if (strchr(path, '%')) {
+        return(expand_path(tmppath));
+    }
+
+    return tmppath;
 }
 
 /*
@@ -1090,8 +1109,10 @@ static int rm_rf(const char *path, const struct timeval *tv,
 
             if ((buf = pathcat(path, ent->d_name)) != NULL)
             {
-                if (lstat(buf, &sb) == -1)
+                if (lstat(buf, &sb) == -1) {
+                    free(buf);
                     continue;
+                }
 
                 if (rm_rf(buf, tv, check_ignores, follow_symlinks))
                     warnx("rm_rf: rm_rf(%s)", buf);
@@ -1211,22 +1232,24 @@ static int execute_action(
              */
         case IGN:
         case IGNR:
-            ignent_t *new_ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
+            {
+                ignent_t *new_ignores = realloc( ignores, (sizeof(ignent_t) * (ignores_size+1)) );
 
-            if (new_ignores == NULL) {
-                warn("IGN: realloc");
-                goto fail;
+                if (new_ignores == NULL) {
+                    warn("IGN: realloc");
+                    goto fail;
+                }
+
+                ignores = new_ignores;
+
+                strncpy(ignores[ignores_size].path, path, PATH_MAX - 1);
+                ignores[ignores_size].contents = (act == IGN) ? true : false;
+                ignores[ignores_size].length   = strlen(ignores[ignores_size].path);
+                ignores_size++;
+
+                if (debug)
+                    printf("DEBUG: ignore/r %s\n", path);
             }
-
-            ignores = new_ignores;
-
-            strncpy(ignores[ignores_size].path, path, PATH_MAX - 1);
-            ignores[ignores_size].contents = (act == IGN) ? true : false;
-            ignores[ignores_size].length   = strlen(ignores[ignores_size].path);
-            ignores_size++;
-
-            if (debug)
-                printf("DEBUG: ignore/r %s\n", path);
             break;
 
             /* z - Adjust the access mode, group and user, and restore the
@@ -1238,37 +1261,39 @@ static int execute_action(
              */
         case CHMOD:
         case CHMODR:
-            struct stat sb;
+            {
+                struct stat sb;
 
-            if (do_create) {
-                mode_t mmode = mode;
+                if (do_create) {
+                    mode_t mmode = mode;
 
-                if (defmode) {
-                    if (stat(path, &sb) == -1)
-                        warn("CHMOD: stat(%s)", path);
-                    else {
-                        if (S_ISDIR(sb.st_mode))
-                            mmode = def_folder_mode;
-                        else
-                            mmode = def_file_mode;
+                    if (defmode) {
+                        if (stat(path, &sb) == -1)
+                            warn("CHMOD: stat(%s)", path);
+                        else {
+                            if (S_ISDIR(sb.st_mode))
+                                mmode = def_folder_mode;
+                            else
+                                mmode = def_file_mode;
+                        }
                     }
-                }
 
-                if (mask) {
-                    errno = ENOSYS;
-                    warn("chmod(%s,%o|%o)", path, mmode, mask);
-                } else {
-                    if (debug)
-                        printf("DEBUG: chmod/r %s,%o", path, mmode);
+                    if (mask) {
+                        errno = ENOSYS;
+                        warn("chmod(%s,%o|%o)", path, mmode, mask);
+                    } else {
+                        if (debug)
+                            printf("DEBUG: chmod/r %s,%o", path, mmode);
 
-                    if (chmod(path, mmode))
-                        warn("CHMOD: chmod(%s,%o)", path, mmode);
+                        if (chmod(path, mmode))
+                            warn("CHMOD: chmod(%s,%o)", path, mmode);
+                    }
+                    /* FIXME is the logic around -1 right here ? */
+                    uid_t tmpuid = defuid ? (uid_t)-1 : uid;
+                    gid_t tmpgid = defgid ? (gid_t)-1 : gid;
+                    if (lchown(path, tmpuid, tmpgid))
+                        warn("CHMOD: lchown(%s,%d,%d)", path, tmpuid, tmpgid);
                 }
-                /* FIXME is the logic around -1 right here ? */
-                uid_t tmpuid = defuid ? (uid_t)-1 : uid;
-                gid_t tmpgid = defgid ? (gid_t)-1 : gid;
-                if (lchown(path, tmpuid, tmpgid))
-                    warn("CHMOD: lchown(%s,%d,%d)", path, tmpuid, tmpgid);
             }
             break;
 
@@ -1690,7 +1715,7 @@ static void process_line(const char *line)
 {
     char *raw_type = NULL, *raw_path = NULL, *raw_mode = NULL;
     char *raw_uid  = NULL,  *raw_gid = NULL,  *raw_age = NULL;
-    char *arg      = NULL;
+    char *arg      = NULL,  *raw_arg = NULL;
 
     char *dest = NULL, *src = NULL, *path = NULL;
 
@@ -1699,7 +1724,6 @@ static void process_line(const char *line)
     int subonly = 0;
     int fields = 0;
     int i = 0;
-    int ret = 0;
 
     char  **globs    = NULL;
     size_t  nglobs   = 0;
@@ -1720,7 +1744,7 @@ static void process_line(const char *line)
     /* Type Path Mode User Group Age Argument */
     fields = sscanf(line,
             "%ms %ms %ms %ms %ms %ms %m[^\n]s",
-            &raw_type, &raw_path, &raw_mode, &raw_uid, &raw_gid, &raw_age, &arg);
+            &raw_type, &raw_path, &raw_mode, &raw_uid, &raw_gid, &raw_age, &raw_arg);
 
     /* Type and Path are mandatory for all types */
     if (fields == EOF || fields < 2) {
@@ -1751,7 +1775,7 @@ static void process_line(const char *line)
     act = cfg_elem->act;
 
     /* ensure an argument is present for those that require it */
-    if (cfg_elem->arg_type && arg == NULL) {
+    if (cfg_elem->arg_type && raw_arg == NULL) {
         warnx("process_line: argument is mandaotry for type: %s", line);
         goto cleanup;
     }
@@ -1767,7 +1791,7 @@ static void process_line(const char *line)
 
     /* perform tmpfiles.d specific expansions */
     if (raw_path) dest = vet_path(raw_path);
-    if (arg)      arg  = vet_path(arg);
+    if (raw_arg)  arg  = vet_path(raw_arg);
 
     if (dest == NULL)
         goto cleanup;
@@ -1797,7 +1821,7 @@ static void process_line(const char *line)
         dev = -1;
 
     if ((cfg_elem->options & CFG_GLOB)) {
-        if ((ret = glob_file(path, &globs, &nglobs, &fileglob))) {
+        if (glob_file(path, &globs, &nglobs, &fileglob)) {
             if (errno != ENOENT)
                 warn("process_line: glob_file: <%s>", path);
             goto cleanup;
@@ -1848,6 +1872,10 @@ cleanup:
         free(raw_gid);
     if (raw_age)
         free(raw_age);
+    if (raw_path)
+        free(raw_path);
+    if (raw_arg)
+        free(raw_arg);
     if (arg)
         free(arg);
     if (dest)
@@ -1896,6 +1924,9 @@ static void process_file(const char *file, const char *folder)
                 break;
 
             line = trim(line);
+            if (line == NULL)
+                break;
+
             if (cnt != 1 && line[0] != '#' && line[0] != '\n' && line[0])
                 process_line(line);
 
@@ -1946,8 +1977,10 @@ static void clean_config_files(void)
         return;
 
     for (int i = 0; i < num_config_files; i++)
-        if (config_files[i])
+        if (config_files[i]) {
             free (config_files[i]);
+            config_files[i] = NULL;
+        }
 
     free(config_files);
 }
@@ -2004,6 +2037,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    atexit(clean_constants);
+    atexit(clean_config_files);
+
     if (fail) {
         show_help();
         exit(EXIT_FAILURE);
@@ -2019,18 +2055,19 @@ int main(int argc, char *argv[])
         exit(EXIT_SUCCESS);
     }
 
-    atexit(clean_constants);
-
     if (optind < argc) {
-        if ((config_files = (char **)calloc(argc - optind, sizeof(char *))) == NULL)
+        if ((config_files = (char **)calloc(argc - optind + 1, sizeof(char *))) == NULL)
             err(EXIT_FAILURE, "main: calloc");
 
-        atexit(clean_config_files);
-
-        while (optind < argc)
+        while ( (optind < argc) && (num_config_files < max_config_files) )
+        {
             if ((config_files[num_config_files++] = strdup(argv[optind++])) == NULL) {
                 err(EXIT_FAILURE, "main: strdup");
             }
+        }
+
+        if (num_config_files == max_config_files)
+            warnx("main: too many config files (max %d)", max_config_files);
     }
 
     if (!opt_root)
@@ -2062,6 +2099,9 @@ int main(int argc, char *argv[])
     free(tmppath);
 
     for (int i = 0; i < num_config_files; i++) {
+        if (config_files[i] == NULL) /* should not happen? */
+            continue;
+
         char *tmp;
         if ((tmp = pathcat(opt_root, config_files[i])) == NULL) {
             warn("main: pathcat");
