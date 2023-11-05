@@ -198,7 +198,7 @@ static const mode_t def_folder_mode = def_file_mode|S_IXUSR|S_IXGRP|S_IXOTH;
 /* private functions */
 
 /* TODO refactor to not free(str) */
-__attribute__((nonnull))
+__attribute__((nonnull, access(read_only, 1)))
 static char *trim(const char *str)
 {
 	char *ret;
@@ -229,7 +229,7 @@ static char *trim(const char *str)
 	return ret;
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull, access(read_only, 1)))
 static int is_dot(const char *path)
 {
 	if( !*path )
@@ -241,7 +241,7 @@ static int is_dot(const char *path)
 	return false;
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull, access(read_only, 1), access(read_only, 2)))
 static char *pathcat(const char *a, const char *b)
 {
     size_t len_a = strlen(a);
@@ -269,7 +269,7 @@ static char *pathcat(const char *a, const char *b)
     return ret;
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull, access(read_only, 1)))
 static int isnumber(const char *t)
 {
     size_t i;
@@ -304,7 +304,7 @@ static void show_help(void)
           );
 }
 
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2)))
 static int validate_type(const char *raw, char *type)
 {
     const char *tmp;
@@ -333,7 +333,7 @@ static int validate_type(const char *raw, char *type)
     return ret;
 }
 
-__attribute__((nonnull))
+__attribute__((nonnull, access(read_only, 1)))
 static dev_t vet_dev(const char *t)
 {
     unsigned int major, minor;
@@ -349,7 +349,7 @@ static dev_t vet_dev(const char *t)
 /*
  * If omitted or - use 0 unless z/Z then leave UID alone
  */
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2)))
 static uid_t vet_uid(const char *t, bool *defuid)
 {
     if (*t == '-') {
@@ -375,7 +375,7 @@ static uid_t vet_uid(const char *t, bool *defuid)
 /*
  * If omitted or - use 0 unless z/Z then leave GID alone
  */
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2)))
 static gid_t vet_gid(const char *t, bool *defgid)
 {
     if (*t == '-') {
@@ -513,7 +513,8 @@ static const char *getmachineid(void)
  * If prefixed with "~" this is masked on the already set bits.
  * If prefixed with ":" then mode is only used on creation.
  */
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2),
+            access(write_only, 3), access(write_only, 4)))
 static mode_t vet_mode(const char *t, mode_t *mask, bool *defmode, bool *create_only)
 {
     const char *mod = t;
@@ -709,7 +710,7 @@ print_gid:
  * %v - Kernel release (uname -r)
  * %% - %
  */
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1)))
 static char *vet_path(const char *path)
 {
     char *tmppath;
@@ -736,7 +737,7 @@ static char *vet_path(const char *path)
  * but not the files and directories immediately inside it.
  */
 
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2)))
 static struct timeval *vet_age(const char *t, int *subonly)
 {
     if (*t == '-') {
@@ -804,7 +805,8 @@ static struct timeval *vet_age(const char *t, int *subonly)
     return tv;
 }
 
-__attribute__((nonnull, warn_unused_result))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(write_only, 2),
+            access(write_only, 3), access(write_only, 4)))
 static int glob_file(const char *path, char ***matches, size_t *count,
         glob_t **pglob)
 {
@@ -844,6 +846,7 @@ static int glob_file(const char *path, char ***matches, size_t *count,
 }
 
 /* TODO what mode_t for the created file? */
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(read_only, 2)))
 static int copy_one_file(const char *src, const char *dst)
 {
     struct stat sb;
@@ -918,6 +921,7 @@ fail:
     return -1;
 }
 
+__attribute__((nonnull, warn_unused_result, access(read_only, 1), access(read_only, 2)))
 static int copy_src_dir(const char *src, const char *dst)
 {
     struct stat sb;
@@ -995,7 +999,8 @@ static int copy_src_dir(const char *src, const char *dst)
         /* dirent is a file */
 
         if (!cur_src_dir) {
-            copy_one_file(path_src, path_dst);
+            if (copy_one_file(path_src, path_dst))
+                warn("copy_src_dir: copy_one_file");
             continue;
         }
 
@@ -1021,7 +1026,8 @@ static int copy_src_dir(const char *src, const char *dst)
             printf("DEBUG: copy_src_dir: recursion into %s\n", path_src);
         }
             
-        copy_src_dir(path_src, path_dst);
+        if (copy_src_dir(path_src, path_dst))
+            warn("copy_src_dir: copy_src_dir");
     }
 
     closedir(dirp);
@@ -1029,7 +1035,7 @@ static int copy_src_dir(const char *src, const char *dst)
 }
 
 /* a wrapper function around unlink(3) that checks for ignored paths */
-__attribute__((nonnull,warn_unused_result))
+__attribute__((nonnull,warn_unused_result, access(read_only, 1)))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
 {
     if (check_ignores) {
@@ -1053,7 +1059,7 @@ static int unlink_wrapper(const char *pathname, bool check_ignores)
     return unlink(pathname);
 }
 
-__attribute__((nonnull(1),warn_unused_result))
+__attribute__((nonnull(1),warn_unused_result, access(read_only, 1), access(read_only, 2)))
 static int rm_if_old(const char *path, const struct timeval *tv, bool check_ignores)
 {
     struct stat sb;
@@ -1086,7 +1092,7 @@ static int rm_if_old(const char *path, const struct timeval *tv, bool check_igno
     return 0;
 }
 
-__attribute__((nonnull(1), warn_unused_result))
+__attribute__((nonnull(1), warn_unused_result, access(read_only, 1), access(read_only, 2)))
 static int rm_rf(const char *path, const struct timeval *tv,
         bool check_ignores, bool follow_symlinks)
 {
@@ -1171,7 +1177,7 @@ static int rm_rf(const char *path, const struct timeval *tv,
  *
  * @return 0 if OK, -1 for error
  */
-__attribute__((nonnull(2,14), warn_unused_result))
+__attribute__((nonnull(2,14), warn_unused_result, access(read_only, 2), access(read_only, 3), access(read_only, 14)))
 static int execute_action(
         char act, char *path, const struct timeval *age,
         const char *arg,
@@ -1730,8 +1736,8 @@ fail:
     goto done;
 }
 
-__attribute__((nonnull))
-static void process_line(const char *line)
+__attribute__((nonnull, warn_unused_result, access(read_only, 1)))
+static int process_line(const char *line)
 {
     char *raw_type = NULL, *raw_path = NULL, *raw_mode = NULL;
     char *raw_uid  = NULL,  *raw_gid = NULL,  *raw_age = NULL;
@@ -1744,6 +1750,7 @@ static void process_line(const char *line)
     int subonly = 0;
     int fields = 0;
     int i = 0;
+    int rc = 0;
 
     char  **globs    = NULL;
     size_t  nglobs   = 0;
@@ -1768,6 +1775,7 @@ static void process_line(const char *line)
 
     /* Type and Path are mandatory for all types */
     if (fields == EOF || fields < 2) {
+        rc = -1;
         if (errno)
             warn("process_line: sscanf");
         else
@@ -1788,6 +1796,7 @@ static void process_line(const char *line)
 
     if (configuration[(uint8_t)type].act == ACT_NULL) {
         warnx("process_line: invalid type: %s", line);
+        rc = -1;
         goto cleanup;
     }
 
@@ -1797,6 +1806,7 @@ static void process_line(const char *line)
     /* ensure an argument is present for those that require it */
     if (cfg_elem->arg_type && raw_arg == NULL) {
         warnx("process_line: argument is mandaotry for type: %s", line);
+        rc = -1;
         goto cleanup;
     }
 
@@ -1832,18 +1842,23 @@ static void process_line(const char *line)
     if (cfg_elem->arg_type == ARG_NODE) {
         if (arg == NULL) {
             warn("process_line: missing argument for device node");
+            rc = -1;
             goto cleanup;
         }
 
-        if ((dev = vet_dev(arg)) == (dev_t)-1)
+        if ((dev = vet_dev(arg)) == (dev_t)-1) {
+            rc = -1;
             goto cleanup;
+        }
     } else
         dev = -1;
 
     if ((cfg_elem->options & CFG_GLOB)) {
         if (glob_file(path, &globs, &nglobs, &fileglob)) {
-            if (errno != ENOENT)
+            if (errno != ENOENT) {
+                rc = -1;
                 warn("process_line: glob_file: <%s>", path);
+            }
             goto cleanup;
         }
 
@@ -1904,71 +1919,80 @@ cleanup:
         free(age);
     if (fileglob)
         globfree(fileglob);
+
+    return rc;
 }
 
-__attribute__((nonnull(1)))
-static void process_file(const char *file, const char *folder)
+__attribute__((nonnull(1), access(read_only, 1), access(read_only, 2)))
+static int process_file(const char *file, const char *folder)
 {
     char *in = NULL;
-    int len = 0;
     char *line = NULL;
+    FILE *fp = NULL;
     ssize_t cnt = 0;
     size_t ignore = 0;
+    int len = 0;
+    int rc = -1;
 
     if (folder) {
         len = strlen(file) + strlen(folder) + 2;
         if ((in = calloc(1, len)) == NULL) {
             warn("process_file: calloc");
-            return;
+            return -1;
         }
         snprintf(in, len, "%s/%s", folder, file);
     } else {
         if ((in = strdup(file)) == NULL) {
             warn("process_file: strdup");
-            return;
+            return -1;
         }
     }
 
+    /* is this correct, or should ignores be kept between config files? */
     if (ignores) {
         ignores_size = 0;
         free(ignores);
         ignores = NULL;
     }
 
-    FILE *fp;
-
-    if ((fp = fopen(in, "r")) != NULL) {
-        while( (cnt = getline(&line, &ignore, fp)) != -1 )
-        {
-            if (line == NULL)
-                break;
-
-            char *tmp_line = line;
-            line = trim(tmp_line);
-            free(tmp_line);
-
-            if (line == NULL)
-                break;
-
-            if (cnt != 1 && line[0] != '#' && line[0] != '\n' && line[0])
-                process_line(line);
-
-            free(line);
-            line = NULL;
-        }
-
-        if (line)
-            free(line);
-
-        fclose(fp);
-    } else
+    if ((fp = fopen(in, "r")) == NULL) {
         warn("process_file: fopen: <%s>", in);
+        goto done;
+    }
 
+    while( (cnt = getline(&line, &ignore, fp)) != -1 )
+    {
+        if (line == NULL)
+            break;
+
+        char *tmp_line = line;
+        line = trim(tmp_line);
+        free(tmp_line);
+
+        if (line == NULL)
+            break;
+
+        if (cnt != 1 && line[0] != '#' && line[0] != '\n' && line[0])
+            if (process_line(line))
+                rc = -1;
+
+        free(line);
+        line = NULL;
+    }
+
+    if (line)
+        free(line);
+
+    fclose(fp);
+    rc = 0;
+
+done:
     free(in);
+    return rc;
 }
 
 __attribute__((nonnull))
-static void process_folder(const char *folder)
+static int process_folder(const char *folder)
 {
     DIR *dirp;
     struct dirent *dirent;
@@ -1976,8 +2000,10 @@ static void process_folder(const char *folder)
 
     if ((dirp = opendir(folder)) == NULL) {
         warn("process_folder: opendir: <%s>", folder);
-        return;
+        return -1;
     }
+
+    int rc = 0;
 
     while( (dirent = readdir(dirp)) )
     {
@@ -1988,10 +2014,12 @@ static void process_folder(const char *folder)
         if (strncmp(dirent->d_name + len - cfg_ext_len + 1, cfg_ext, cfg_ext_len))
             continue;
 
-        process_file(dirent->d_name, folder);
+        if (process_file(dirent->d_name, folder))
+            rc = -1;
     }
 
     closedir(dirp);
+    return rc;
 }
 
 static void clean_config_files(void)
@@ -2018,10 +2046,8 @@ static void clean_constants(void)
         free(kernelrel);
     if (bootid)
         free(bootid);
-
     if (ignores)
         free(ignores);
-
     if (opt_prefix)
         free(opt_prefix);
     if (opt_exclude)
@@ -2035,6 +2061,7 @@ static void clean_constants(void)
 
 /* public functions */
 
+__attribute__((access(read_only, 2, 1)))
 int main(int argc, char *argv[])
 {
     int c, fail = 0;
