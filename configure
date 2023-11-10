@@ -4,6 +4,70 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+exists ()
+{
+	r=0; cwd="$(pwd)"
+	while [ $# -gt 0 ]; do
+		v=1
+		arg="$1"
+		shift
+		case "$arg" in
+			''|*/ )
+				:
+			;;
+		/* )
+			if [ -f "$arg" ] && [ -x "$arg" ]; then
+				printf %s\\n "$arg"
+				v=0
+			fi
+		;;
+		./* )
+			if [ -f "$arg" ] && [ -x "$arg" ]; then
+				pre="$(cd -- "${arg%%/*}/" && pwd)"
+				printf %s\\n "${pre%/}/$arg"
+				v=0
+			fi
+		;;
+		*/* )
+			if [ -f "$arg" ] && [ -x "$arg" ]; then
+				printf %s\\n "$(cd -- "${arg%%/*}/.." && pwd)/$arg"
+				v=0
+			fi
+		;;
+		* )
+			if [ -n "${PATH+x}" ]; then
+				p=":${PATH:-$cwd}"
+				while [ "$p" != "${p#*:}" ] && [ -n "${p#*:}" ]; do
+					p="${p#*:}"
+					x="${p%%:*}"
+					z="${x:-$cwd}"
+					d="${z%/}/$arg"
+					if [ -f "$d" ] && [ -x "$d" ]; then
+						case "$d" in
+							/* )
+								:
+							;;
+							./* )
+								pre="$(cd -- "${d%/*}/" && pwd)"
+								d="${pre%/}/$d"
+							;;
+							* )
+								d="$(cd -- "${d%/*}/" && pwd)/$arg"
+							;;
+						esac
+						printf %s\\n "$d"
+						v=0
+						break
+					fi
+				done
+			fi
+		;;
+		esac
+		[ $v = 0 ] || r=1
+	done
+	return $r
+}
+
 fail()
 {
 	echo "${1}"
@@ -134,9 +198,9 @@ TARGET=${TARGET:-}
 
 # Location of default tools
 
-PKG_CONFIG=${PKG_CONFIG:-pkg-config}
-CC=${CC:-${TOOL}gcc}
-CXX=${CXX:-${TOOL}g++}
+PKG_CONFIG="$(exists ${PKG_CONFIG:-pkg-config})" || PKG_CONFIG=""
+CC="$(exists ${CC:-${TOOL}gcc})" || CC=""
+CXX="$(exists ${CXX:-${TOOL}g++})" || CXX=""
 
 # Predefined values, which should not be easily changed
 
@@ -146,11 +210,11 @@ VERSION=$(cat "${SRCDIR}/misc/VERSION")
 # Check for a c compiler (mandatory)
 
 echo -n "Checking for a C compiler ... "
-if [[ ! -x "$(which "${CC}")" ]]; then
+if [[ ! -x "${CC}" ]]; then
 	fail "Error: CC not valid"
 else
 	export CC
-	which "${CC}" | tee -a config.log
+	echo "${CC}" | tee -a config.log
 fi
 
 echo -n "Checking $(basename "${CC}") can produce executables ... "
@@ -189,12 +253,12 @@ LIB_CHECK=""
 # Check for pkg-config (mandatory)
 
 echo -n "Checking for pkg-config ... "
-if [[ ! -x "$(which "${PKG_CONFIG}")" ]]; then
+if [[ ! -x "${PKG_CONFIG}" ]]; then
 	fail "Error: PKG_CONFIG not valid"
 fi
 
 export PKG_CONFIG
-which "${PKG_CONFIG}"
+echo "${PKG_CONFIG}"
 
 # Support functions
 
