@@ -148,7 +148,7 @@ else
 fi
 
 echo -n "Checking $(basename "${CC}") can produce executables ... "
-echo -e '#include <stdlib.h>\nmain() {exit(0);}' | \
+echo -e '#include <stdlib.h>\nint main(void) {exit(0);}' | \
 	if ${CC} -xc -o /dev/null - 2>>config.log; then
 		echo "Ok"
 	else
