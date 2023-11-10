@@ -4,6 +4,12 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+fail()
+{
+	echo "${1}"
+	exit 1
+}
+
 show_help() 
 {
 	cat <<EOF
@@ -199,12 +205,6 @@ check_pkg()
 	local RT=$?
 	ok ${RT}
 	return ${RT}
-}
-
-fail()
-{
-	echo "${1}"
-	exit 1
 }
 
 check_header()
