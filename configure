@@ -155,14 +155,9 @@ fail()
 printf "Checking for a C compiler ... "
 echo "command:"
 set -o xtrace
-command -v "${CC}"
-echo "env:"
-which command || true
-type command || true
-echo "rest:"
-if env -i "PATH=$PATH" command -v "${CC}"; then
+if env -i "PATH=$PATH" sh -c "command -v \"${CC}\""; then
 	export CC
-	env -i "PATH=$PATH" command -v "${CC}"
+	env -i "PATH=$PATH" sh -c "command -v \"${CC}\""
 else
 	fail "Error: CC not valid"
 fi
