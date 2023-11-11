@@ -154,10 +154,11 @@ fail()
 
 printf "Checking for a C compiler ... "
 echo "command:"
+set -o xtrace
 command -v "${CC}"
 echo "env:"
-which command
-type command
+which command || true
+type command || true
 echo "rest:"
 if env -i "PATH=$PATH" command -v "${CC}"; then
 	export CC
