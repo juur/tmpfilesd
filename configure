@@ -202,7 +202,7 @@ LIB_CHECK=""
 # Check for pkg-config (mandatory)
 
 printf "Checking for pkg-config ... "
-if ! env -i "PATH=${PATH}" command -v "${PKG_CONFIG}" >/dev/null 2>&1; then
+if ! env -i "PATH=${PATH}" sh -c "command -v \"${PKG_CONFIG}\"" >/dev/null 2>&1; then
 	fail "Error: PKG_CONFIG not valid"
 fi
 
