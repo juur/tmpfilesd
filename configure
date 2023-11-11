@@ -155,6 +155,8 @@ fail()
 printf "Checking for a C compiler ... "
 echo "command:"
 command -v "${CC}"
+echo "env:"
+env -i command -v ls
 echo "rest:"
 if env -i "PATH=$PATH" command -v "${CC}"; then
 	export CC
