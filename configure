@@ -153,8 +153,9 @@ fail()
 # Check for a c compiler (mandatory)
 
 printf "Checking for a C compiler ... "
-echo "command:"
-set -o xtrace
+
+# GitHub Actions use dash as a shell which doesn't have /usr/bin/command and so we need
+# to force the use of the builtin
 if env -i "PATH=$PATH" sh -c "command -v \"${CC}\""; then
 	export CC
 	env -i "PATH=$PATH" sh -c "command -v \"${CC}\""
