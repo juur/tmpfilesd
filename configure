@@ -153,7 +153,7 @@ fail()
 # Check for a c compiler (mandatory)
 
 printf "Checking for a C compiler ... "
-echo "env -i "PATH=$PATH" command -v \"${CC}\""
+command -v "${CC}"
 if env -i "PATH=$PATH" command -v "${CC}"; then
 	export CC
 	env -i "PATH=$PATH" command -v "${CC}"
