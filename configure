@@ -156,11 +156,8 @@ printf "Checking for a C compiler ... "
 echo "command:"
 command -v "${CC}"
 echo "env:"
-echo "env -i command -v ls"
-which sh
-ls -l $(which sh)
-sh --version
-env -i command -v ls
+which command
+type command
 echo "rest:"
 if env -i "PATH=$PATH" command -v "${CC}"; then
 	export CC
