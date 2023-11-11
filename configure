@@ -80,10 +80,12 @@ done
 
 # log all of the scripts output to config.log
 if [ ${QUIET} = 0 ]; then
+	echo "Attempting to create FIFO"
 	FIFO="/tmp/$$.pipe"
 	mkfifo "${FIFO}"
 	# shellcheck disable=SC2064
 	trap "{ rm -f ${FIFO}; }" EXIT
+	echo "FIFO OK"
 	tee <"${FIFO}" &
 	exec 1>"${FIFO}"
 else
@@ -134,8 +136,8 @@ TARGET=${TARGET:-}
 # Location of default tools
 
 PKG_CONFIG=${PKG_CONFIG:-pkg-config}
-CC=${CC:-${TOOL}gcc}
-CXX=${CXX:-${TOOL}g++}
+CC=${CC:-${TOOL}cc}
+CXX=${CXX:-${TOOL}c++}
 
 # Predefined values, which should not be easily changed
 
