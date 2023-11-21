@@ -188,6 +188,7 @@ static const struct option long_options[] = {
 };
 
 static const char   cfg_ext[]   = ".conf";
+static const char   default_opt_root[] = "";
 static const size_t cfg_ext_len = sizeof(cfg_ext);
 
 static const mode_t def_file_mode   = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
@@ -2052,7 +2053,7 @@ static void clean_constants(void)
         free(opt_prefix);
     if (opt_exclude)
         free(opt_exclude);
-    if (opt_root)
+    if (opt_root && opt_root != default_opt_root)
         free(opt_root);
 }
 
@@ -2121,7 +2122,7 @@ int main(int argc, char *argv[])
     }
 
     if (!opt_root)
-        opt_root = "";
+        opt_root = (char *)default_opt_root;
 
 #ifdef DEBUG
     printf("tmpfilesd running\ndo_create=%d,do_clean=%d,"
