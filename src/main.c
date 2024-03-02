@@ -1482,6 +1482,13 @@ mkdir_skip:
                 /* O_TRUNC will do nothing for "f" */
                 open_mode  = O_NOCTTY|O_WRONLY|O_CREAT|O_TRUNC;
 
+                char *tmppath;
+                if ((tmppath = strdup(path)) == NULL)
+                    err(EXIT_FAILURE, "strdup(path)");
+
+                mkpath(dirname(tmppath), def_folder_mode);
+                free(tmppath);
+
                 if ((fd = open(path, open_mode, (defmode ? def_file_mode : mode))) == -1) {
                     warn("open(%s)", path);
                     break;
@@ -1692,6 +1699,13 @@ mkdir_skip:
                     case CREATE_BLK:   mode = S_IFBLK; break;
                     case CREATE_PIPE:  mode = 0;       break;
                 }
+
+                char *tmppath;
+                if ((tmppath = strdup(path)) == NULL)
+                    err(EXIT_FAILURE, "strdup(path)");
+
+                mkpath(dirname(tmppath), def_folder_mode);
+                free(tmppath);
 
                 mode |= (defmode ? def_file_mode : mode);
 
