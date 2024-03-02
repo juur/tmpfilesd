@@ -759,7 +759,7 @@ static struct timeval *vet_age(const char *t, int *subonly)
 
     len = sscanf(src, "%d%ms", &ret, &tmp);
 
-    if (len == 0 || len > 2) {
+    if (len == EOF || len == 0 || len > 2) {
         if (tmp) 
             free(tmp);
         warnx("vet_age: invalid age: %s\n", t);
