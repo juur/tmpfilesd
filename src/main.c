@@ -968,7 +968,7 @@ static int copy_src_dir(const char *src, const char *dst)
             snprintf(path_dst, sizeof(path_dst), "%s/%s", dst, basename(tmp_src));
             free(tmp_src);
 
-            return copy_one_file(path_dst, src);
+            return copy_one_file(src, path_dst);
         }
     } 
 
@@ -1036,17 +1036,25 @@ static int copy_src_dir(const char *src, const char *dst)
 }
 
 /* a wrapper function around unlink(3) that checks for ignored paths */
-__attribute__((nonnull,warn_unused_result, access(read_only, 1)))
+__attribute__((nonnull, warn_unused_result, access(read_only, 1)))
+static bool is_ignored_path(const char *pathname)
+{
+    for (int i = 0; i < ignores_size; i++) {
+        /* where contents is true, we check as a prefix otherwise the entire path */
+        if (ignores[i].contents && !strncmp(pathname, ignores[i].path, ignores[i].length))
+            return true;
+        if (!strcmp(pathname, ignores[i].path))
+            return true;
+    }
+
+    return false;
+}
+
+__attribute__((nonnull, warn_unused_result, access(read_only, 1)))
 static int unlink_wrapper(const char *pathname, bool check_ignores)
 {
-    if (check_ignores) {
-        for (int i = 0; i < ignores_size; i++)
-            /* where contents is true, we check as a prefix otherwise the entire path */
-            if (ignores[i].contents && !strncmp(pathname, ignores[i].path, ignores[i].length))
-                return 0;
-            else if (!strcmp(pathname, ignores[i].path))
-                return 0;
-    }
+    if (check_ignores && is_ignored_path(pathname))
+        return 0;
 
     if (!strcmp("/", pathname) || !strcmp(".", pathname) || !strcmp("..", pathname))
         errx(EXIT_FAILURE, "unlink: attempt to remove protected file");
@@ -1100,6 +1108,8 @@ static int rm_rf(const char *path, const struct timeval *tv,
     /* protect some obvious errors */
     if (!strcmp("/", path) || !strcmp(".", path) || !strcmp("..", path))
         errx(EXIT_FAILURE, "rm_rf: attempt to remove protected file");
+    if (check_ignores && is_ignored_path(path))
+        return 0;
 
     char *buf = NULL;
     struct stat sb;
@@ -1154,6 +1164,15 @@ static int rm_rf(const char *path, const struct timeval *tv,
 
         if (errno)
             return -1;
+
+        /* remove the directory itself when appropriate */
+        if (!tv || (time(NULL) - sb.st_mtime) > tv->tv_sec) {
+            if (rmdir(path) == -1 && errno != ENOTEMPTY && errno != EEXIST) {
+                warn("rm_rf: rmdir(%s)", path);
+                return -1;
+            }
+        }
+
         return 0;
     } else {
         /* is not a folder */
