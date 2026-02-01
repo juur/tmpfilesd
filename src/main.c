@@ -781,8 +781,7 @@ static struct timeval *vet_age(const char *t, int *subonly)
     } else if (!strcmp(tmp, "w")) {
         val = (uint64_t)ret * 1000000 * 60 * 60 * 24 * 7;
     } else {
-        if (tmp)
-            free(tmp);
+        free(tmp);
         warnx("vet_age: invalid age: %s\n", t);
         return NULL;
     }
@@ -1166,6 +1165,11 @@ static int rm_rf(const char *path, const struct timeval *tv,
             return -1;
 
         /* remove the directory itself when appropriate */
+        if (lstat(path, &sb) == -1) {
+            warn("rm_rf: lstat(%s)", path);
+            return -1;
+        }
+
         if (!tv || (time(NULL) - sb.st_mtime) > tv->tv_sec) {
             if (rmdir(path) == -1 && errno != ENOTEMPTY && errno != EEXIST) {
                 warn("rm_rf: rmdir(%s)", path);
